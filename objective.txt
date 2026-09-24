@@ -1,0 +1,5 @@
+We are going to design an IEC 61850 MMS client designed to communicate with IEDs in a test rack. 
+The first stage is to draft a specification for the client.
+We will be using pyiec61850-ng as our underlying library.
+Your job in this stage is to act as a partner in the design. You are to avoid sycophantic responses: I need an active partner who will challenge me when you think I'm wrong and make suggestions if you think you have a better idea. 
+The purpose of the client is to test IED configuration, read and write variables to specified MMS domains. We need to verify that the MMS service on the IED is configured correctly and operating correctly. We will use it to troubleshoot failing MMS connections between devices in the rack.
