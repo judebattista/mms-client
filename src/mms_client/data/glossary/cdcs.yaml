@@ -1,0 +1,291 @@
+# Glossary: common data classes (CDCs).
+# Format: see the header of data/hints.yaml.
+
+version: 1
+entries:
+
+# -----------------------------------------------------------------------------------------------------
+# Status
+# -----------------------------------------------------------------------------------------------------
+- id: cdc.sps
+  terms: [SPS, single point status]
+  title: "CDC SPS: single point status"
+  summary: An on/off indication (`stVal` is true or false), with quality and timestamp.
+  related: [cdc.spc, cdc.dps, concept.cdc]
+
+- id: cdc.dps
+  terms: [DPS, double point status, Dbpos]
+  title: "CDC DPS: double point status"
+  summary: >-
+    A position reported with two bits, typically a switch: intermediate, off (open), on (closed) or
+    bad.
+  details: |
+    Two bits let the device tell a switch in travel (intermediate) from one with faulty feedback
+    (bad, both contacts active). Devices refuse to operate from those states.
+  related: [cdc.dpc, add-cause:invalid-position, cdc.sps]
+
+- id: cdc.ins
+  terms: [INS, integer status]
+  title: "CDC INS: integer status"
+  summary: >-
+    An integer status value. In Ed1 it is also used for enumerations such as `Mod`, `Beh` and
+    `Health`.
+  related: [cdc.ens, cdc.inc]
+
+- id: cdc.ens
+  terms: [ENS, enumerated status]
+  title: "CDC ENS: enumerated status (Ed2)"
+  summary: >-
+    A status value taken from a fixed list of named values, such as `Beh` or `Health` in Ed2.
+  related: [cdc.ins, cdc.enc, edition.ed2]
+
+- id: cdc.act
+  terms: [ACT, protection activation]
+  title: "CDC ACT: protection activation"
+  summary: >-
+    Whether a protection function has operated: overall (`general`) and per phase and neutral.
+    Typically used for `Op` (operate/trip).
+  related: [cdc.acd, ln.ptoc, ln.ptrc]
+
+- id: cdc.acd
+  terms: [ACD, directional protection activation]
+  title: "CDC ACD: directional protection activation"
+  summary: >-
+    Like ACT, plus the direction of the fault (forward or backward). Typically used for `Str`
+    (start/pickup).
+  related: [cdc.act, ln.rdir]
+
+- id: cdc.sec
+  terms: [SEC, security violation counting]
+  title: "CDC SEC: security violation counter"
+  summary: >-
+    Counts security violations (such as failed authentications or refused access) and the address of
+    the last offender. Used by GSAL.
+  related: [ln.gsal]
+
+- id: cdc.bcr
+  terms: [BCR, binary counter reading]
+  title: "CDC BCR: binary counter reading"
+  summary: >-
+    A counter value, such as an energy meter, with frozen values for billing periods.
+  related: [ln.mmtr, trgops.dupd]
+
+- id: cdc.vss
+  terms: [VSS, visible string status]
+  title: "CDC VSS: text status (Ed2)"
+  summary: A status value that is a text.
+  related: [cdc.vsg]
+
+- id: cdc.hst
+  terms: [HST, histogram]
+  title: "CDC HST: histogram (Ed2)"
+  summary: A set of counts over value ranges, for example for statistics.
+  related: [concept.cdc]
+
+# -----------------------------------------------------------------------------------------------------
+# Measurements
+# -----------------------------------------------------------------------------------------------------
+- id: cdc.mv
+  terms: [MV, measured value]
+  title: "CDC MV: measured value"
+  summary: >-
+    One analogue measurement (`mag`), with quality and timestamp, often with a dead band that decides
+    when a change is reported.
+  related: [cdc.cmv, fc.mx, ln.mmxu]
+
+- id: cdc.cmv
+  terms: [CMV, complex measured value]
+  title: "CDC CMV: complex measured value"
+  summary: A measurement with magnitude and angle (`cVal`), such as a phase current phasor.
+  related: [cdc.mv, cdc.wye]
+
+- id: cdc.sav
+  terms: [SAV]
+  title: "CDC SAV: sampled value"
+  summary: >-
+    An instantaneous analogue value, mainly for current and voltage transformers on a process bus.
+    Rarely meaningful to read over MMS.
+  related: [ln.tctr, ln.tvtr, scope.sampled-values]
+
+- id: cdc.wye
+  terms: [WYE, phase to ground measurements]
+  title: "CDC WYE: phase-to-ground values"
+  summary: >-
+    A set of phasors for a three-phase system measured against ground or neutral: phases A, B, C,
+    neutral, and derived values.
+  related: [cdc.del, cdc.cmv, ln.mmxu]
+
+- id: cdc.del
+  terms: [DEL, phase to phase measurements]
+  title: "CDC DEL: phase-to-phase values"
+  summary: A set of phasors measured between phases (A-B, B-C, C-A).
+  related: [cdc.wye, ln.mmxu]
+
+- id: cdc.seq
+  terms: [SEQ, sequence components]
+  title: "CDC SEQ: sequence components"
+  summary: >-
+    Positive, negative and zero sequence values of a three-phase quantity, used to detect imbalance
+    and earth faults.
+  related: [ln.msqi, cdc.wye]
+
+# -----------------------------------------------------------------------------------------------------
+# Controllable
+# -----------------------------------------------------------------------------------------------------
+- id: cdc.spc
+  terms: [SPC, controllable single point]
+  title: "CDC SPC: controllable single point"
+  summary: >-
+    An on/off object that can be commanded (ctlVal true/false), with its status (`stVal`) and control
+    structures. Supported by `operate`.
+  related: [cdc.sps, control.ctlmodel, control.oper]
+
+- id: cdc.dpc
+  terms: [DPC, controllable double point]
+  title: "CDC DPC: controllable double point"
+  summary: >-
+    A two-position object that can be commanded, typically a breaker or disconnector position
+    (`Pos`). ctlVal true means close/on, false means open/off. Supported by `operate`.
+  details: |
+    Its status is a double point (intermediate, off, on, bad). Its `ctlModel` decides the control
+    sequence; the usual control point is `CSWI*.Pos`.
+  related: [cdc.dps, ln.cswi, control.ctlmodel, control.oper]
+
+- id: cdc.inc
+  terms: [INC, controllable integer status]
+  title: "CDC INC: controllable integer"
+  summary: >-
+    An integer object that can be commanded. In Ed1 it is also used for `Mod`. Supported by
+    `operate`.
+  related: [cdc.ins, cdc.enc, control.mod]
+
+- id: cdc.enc
+  terms: [ENC, controllable enumerated status]
+  title: "CDC ENC: controllable enumerated (Ed2)"
+  summary: >-
+    An object with named values that can be commanded, such as `Mod` in Ed2. Not among the classes
+    this tool controls in v1 (SPC, DPC, INC).
+  related: [cdc.ens, cdc.inc, control.mod]
+
+- id: cdc.bsc
+  terms: [BSC, binary controlled step position]
+  title: "CDC BSC: binary controlled step position"
+  summary: >-
+    A step position controlled with raise/lower commands, typically a tap changer. Controls for it
+    are planned for a later version of this tool.
+  related: [cdc.isc, ln.yltc, ln.atcc]
+
+- id: cdc.isc
+  terms: [ISC, integer controlled step position]
+  title: "CDC ISC: integer controlled step position"
+  summary: >-
+    A step position controlled by sending the target step. Controls for it are planned for a later
+    version of this tool.
+  related: [cdc.bsc, ln.yltc]
+
+- id: cdc.apc
+  terms: [APC, controllable analogue process value]
+  title: "CDC APC: controllable analogue setpoint"
+  summary: >-
+    An analogue value that can be commanded, such as a setpoint. Controls for it are planned for a
+    later version of this tool.
+  related: [cdc.bac]
+
+- id: cdc.bac
+  terms: [BAC, binary controlled analogue process value]
+  title: "CDC BAC: binary controlled analogue value"
+  summary: >-
+    An analogue value adjusted with raise/lower commands. Controls for it are planned for a later
+    version of this tool.
+  related: [cdc.apc]
+
+# -----------------------------------------------------------------------------------------------------
+# Settings
+# -----------------------------------------------------------------------------------------------------
+- id: cdc.spg
+  terms: [SPG, single point setting]
+  title: "CDC SPG: on/off setting"
+  summary: A setting that is true or false, for example enabling a function.
+  related: [cdc.ing, fc.sp, fc.sg]
+
+- id: cdc.ing
+  terms: [ING, integer setting]
+  title: "CDC ING: integer setting"
+  summary: A setting that is an integer, for example a delay in milliseconds or a count.
+  related: [cdc.spg, cdc.eng]
+
+- id: cdc.eng
+  terms: [ENG, enumerated setting]
+  title: "CDC ENG: enumerated setting (Ed2)"
+  summary: A setting chosen from a fixed list of named values, for example a curve type or direction.
+  related: [cdc.ing, cdc.ens]
+
+- id: cdc.asg
+  terms: [ASG, analogue setting]
+  title: "CDC ASG: analogue setting"
+  summary: >-
+    A setting that is an analogue value, such as a pickup current, often with a range and step the
+    device enforces.
+  related: [cdc.ing, data-access:object-value-invalid]
+
+- id: cdc.curve
+  terms: [CURVE, setting curve]
+  title: "CDC CURVE: setting curve"
+  summary: >-
+    A curve setting, such as the characteristic of an inverse-time overcurrent function, given as a
+    curve type and parameters.
+  related: [cdc.csg, ln.ptoc]
+
+- id: cdc.csg
+  terms: [CSG, curve shape setting]
+  title: "CDC CSG: curve shape setting (Ed2)"
+  summary: A curve setting defined by a list of points.
+  related: [cdc.curve, cdc.csd]
+
+- id: cdc.csd
+  terms: [CSD, curve shape description]
+  title: "CDC CSD: curve shape description"
+  summary: A description of a curve's shape, mainly for display.
+  related: [cdc.csg]
+
+- id: cdc.org
+  terms: [ORG, object reference setting]
+  title: "CDC ORG: object reference setting (Ed2)"
+  summary: >-
+    A setting that holds the reference of another object, for example which signal a function uses
+    as input.
+  related: [concept.object-reference]
+
+- id: cdc.tsg
+  terms: [TSG, time setting]
+  title: "CDC TSG: time setting (Ed2)"
+  summary: A setting that is a time of day or a calendar time.
+  related: [cdc.ing]
+
+- id: cdc.vsg
+  terms: [VSG, visible string setting]
+  title: "CDC VSG: text setting (Ed2)"
+  summary: A setting that is a text.
+  related: [cdc.vss]
+
+# -----------------------------------------------------------------------------------------------------
+# Description
+# -----------------------------------------------------------------------------------------------------
+- id: cdc.lpl
+  terms: [LPL, NamPlt, logical node name plate]
+  title: "CDC LPL: logical node name plate"
+  summary: >-
+    Identification of a logical node or, in LLN0 (`NamPlt`), of the whole logical device: vendor,
+    software revision, description, configuration revision and namespace (`ldNs`).
+  details: |
+    `info` shows `LLN0.NamPlt` of every logical device. `configRev` changes when the logical
+    device's configuration changes; `ldNs` tells the edition.
+  related: [concept.ldns, cdc.dpl, concept.identify]
+
+- id: cdc.dpl
+  terms: [DPL, PhyNam, device name plate]
+  title: "CDC DPL: device name plate"
+  summary: >-
+    Identification of the physical device (`LPHD.PhyNam`): vendor, model, hardware and software
+    revision, serial number.
+  related: [ln.lphd, cdc.lpl, concept.identify]

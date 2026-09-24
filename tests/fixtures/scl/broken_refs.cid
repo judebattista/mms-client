@@ -1,0 +1,544 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Hand-written test fixture for mms-client: a variant of bcu_ed2.cid with broken references,
+     for self-consistency checks:
+       * ReportControl urcbMeas references dataset dsMeasOld, which does not exist;
+       * dataset dsStatus has a member in a logical node that does not exist (XCBR2) and a
+         member with the wrong functional constraint (GGIO1.SPCSO1.stVal as MX).
+     Vendor, model and all values are fictitious. -->
+<SCL xmlns="http://www.iec.ch/61850/2003/SCL" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+     xmlns:rw="http://rackworks.example/scl-ext" version="2007" revision="B">
+  <Header id="BCU1-broken" version="1" revision="4" toolID="mms-client test fixture" nameStructure="IEDName">
+    <Text>Configured for the test rack</Text>
+  </Header>
+  <Communication>
+    <SubNetwork name="StationBus" type="8-MMS">
+      <BitRate unit="b/s" multiplier="M">100</BitRate>
+      <ConnectedAP iedName="BCU1" apName="S1">
+        <Address>
+          <P type="IP">10.0.0.11</P>
+          <P type="IP-SUBNET">255.255.255.0</P>
+          <P type="IP-GATEWAY">10.0.0.1</P>
+          <P type="OSI-AP-Title">1,3,9999,33</P>
+          <P type="OSI-AE-Qualifier">33</P>
+          <P type="OSI-PSEL">00000001</P>
+          <P type="OSI-SSEL">0001</P>
+          <P type="OSI-TSEL">0001</P>
+        </Address>
+        <GSE ldInst="PROT" cbName="gcbTrip">
+          <Address>
+            <P type="MAC-Address">01-0C-CD-01-00-11</P>
+            <P type="APPID">0011</P>
+            <P type="VLAN-ID">000</P>
+            <P type="VLAN-PRIORITY">4</P>
+          </Address>
+          <MinTime unit="s" multiplier="m">4</MinTime>
+          <MaxTime unit="s" multiplier="m">1000</MaxTime>
+        </GSE>
+      </ConnectedAP>
+    </SubNetwork>
+  </Communication>
+  <IED name="BCU1" type="BCU-100" manufacturer="Rackworks" configVersion="2.4" desc="Bay 1 control unit">
+    <Private type="rackworks-tool">
+      <rw:Project name="rack-demo"/>
+    </Private>
+    <Services nameLength="64">
+      <DynAssociation max="4"/>
+      <GetDirectory/>
+      <GetDataObjectDefinition/>
+      <DataObjectDirectory/>
+      <GetDataSetValue/>
+      <DataSetDirectory/>
+      <ConfDataSet max="10" maxAttributes="60" modify="false"/>
+      <DynDataSet max="4" maxAttributes="60"/>
+      <ReadWrite/>
+      <ConfReportControl max="12" bufMode="both" bufConf="false"/>
+      <GetCBValues/>
+      <ReportSettings cbName="Conf" datSet="Dyn" rptID="Dyn" optFields="Dyn" bufTime="Dyn" trgOps="Dyn"
+                      intgPd="Dyn" resvTms="true" owner="true"/>
+      <LogSettings cbName="Conf" datSet="Conf" logEna="Dyn" trgOps="Conf" intgPd="Conf"/>
+      <GSESettings cbName="Conf" datSet="Conf" appID="Conf" dataLabel="Conf"/>
+      <GOOSE max="4"/>
+      <ConfLNs fixPrefix="true" fixLnInst="true"/>
+      <SettingGroups>
+        <SGEdit resvTms="true"/>
+        <ConfSG resvTms="true"/>
+      </SettingGroups>
+      <FileHandling/>
+      <ConfLdName/>
+    </Services>
+    <AccessPoint name="S1">
+      <Server timeout="30">
+        <Authentication none="true"/>
+        <LDevice inst="CTRL" desc="Bay control">
+          <LN0 lnClass="LLN0" inst="" lnType="BCU1_LLN0_CTRL">
+            <DataSet name="dsStatus" desc="Switchgear and alarm status">
+              <FCDA ldInst="CTRL" lnClass="CSWI" lnInst="1" doName="Pos" fc="ST"/>
+              <FCDA ldInst="CTRL" lnClass="XCBR" lnInst="1" doName="Pos" daName="stVal" fc="ST"/>
+              <FCDA ldInst="CTRL" lnClass="XCBR" lnInst="1" doName="Pos" daName="q" fc="ST"/>
+              <FCDA ldInst="CTRL" lnClass="GGIO" lnInst="1" doName="SPCSO1" daName="stVal" fc="ST"/>
+              <FCDA ldInst="CTRL" lnClass="GGIO" lnInst="1" doName="Ind1" fc="ST"/>
+              <FCDA ldInst="CTRL" lnClass="LLN0" doName="LocKey" daName="stVal" fc="ST"/>
+              <FCDA ldInst="CTRL" lnClass="XCBR" lnInst="2" doName="Pos" daName="stVal" fc="ST"/>
+              <FCDA ldInst="CTRL" lnClass="GGIO" lnInst="1" doName="SPCSO1" daName="stVal" fc="MX"/>
+            </DataSet>
+            <DataSet name="dsMeas" desc="Bay measurements">
+              <FCDA ldInst="CTRL" lnClass="MMXU" lnInst="1" doName="TotW" daName="mag.f" fc="MX"/>
+              <FCDA ldInst="CTRL" lnClass="MMXU" lnInst="1" doName="PhV.phsA" daName="cVal.mag.f" fc="MX"/>
+              <FCDA ldInst="CTRL" lnClass="MMXU" lnInst="1" doName="PhV.phsB" fc="MX"/>
+              <FCDA ldInst="CTRL" lnClass="MMXU" lnInst="1" doName="Hz" fc="MX"/>
+            </DataSet>
+            <ReportControl name="brcbStatus" rptID="BCU1_Status" datSet="dsStatus" confRev="1" buffered="true"
+                           bufTime="100" intgPd="0" desc="Status events for SCADA">
+              <TrgOps dchg="true" qchg="true" period="false" gi="true"/>
+              <OptFields seqNum="true" timeStamp="true" dataSet="true" reasonCode="true" entryID="true"
+                         configRef="true" bufOvfl="true"/>
+              <RptEnabled max="3">
+                <ClientLN iedName="SM1" apRef="S1" ldInst="LD0" lnClass="IHMI" lnInst="1" desc="Station HMI"/>
+                <ClientLN iedName="GW1" apRef="S1" ldInst="LD0" lnClass="ITCI" lnInst="1" desc="SCADA gateway"/>
+              </RptEnabled>
+            </ReportControl>
+            <ReportControl name="urcbMeas" rptID="BCU1_Meas" datSet="dsMeasOld" confRev="1" buffered="false"
+                           indexed="false" intgPd="5000">
+              <TrgOps dchg="true" period="true"/>
+              <OptFields seqNum="true" timeStamp="true" dataSet="true" reasonCode="true"/>
+              <RptEnabled max="1">
+                <ClientLN iedName="SM1" apRef="S1" ldInst="LD0" lnClass="IHMI" lnInst="1"/>
+              </RptEnabled>
+            </ReportControl>
+            <LogControl name="lcbEvents" datSet="dsStatus" logName="EventLog" logEna="true" reasonCode="true">
+              <TrgOps dchg="true" qchg="true"/>
+            </LogControl>
+            <DOI name="Mod">
+              <DAI name="stVal"><Val>on</Val></DAI>
+            </DOI>
+            <DOI name="Beh">
+              <DAI name="stVal"><Val>on</Val></DAI>
+            </DOI>
+            <DOI name="Health">
+              <DAI name="stVal"><Val>Ok</Val></DAI>
+            </DOI>
+            <DOI name="NamPlt">
+              <DAI name="vendor"><Val>Rackworks</Val></DAI>
+              <DAI name="swRev"><Val>2.4.1</Val></DAI>
+              <DAI name="d"><Val>Bay 1 control</Val></DAI>
+              <DAI name="configRev"><Val>BCU1-2026-09-01</Val></DAI>
+              <DAI name="ldNs"><Val>IEC 61850-7-4:2007B</Val></DAI>
+            </DOI>
+            <Log name="EventLog"/>
+          </LN0>
+          <LN lnClass="LPHD" inst="1" lnType="BCU1_LPHD">
+            <DOI name="PhyNam">
+              <DAI name="vendor"><Val>Rackworks</Val></DAI>
+              <DAI name="hwRev"><Val>C</Val></DAI>
+              <DAI name="swRev"><Val>2.4.1</Val></DAI>
+              <DAI name="serNum"><Val>RW-000123</Val></DAI>
+              <DAI name="model"><Val>BCU-100</Val></DAI>
+            </DOI>
+            <DOI name="PhyHealth">
+              <DAI name="stVal"><Val>Ok</Val></DAI>
+            </DOI>
+          </LN>
+          <LN lnClass="CSWI" inst="1" lnType="BCU1_CSWI" desc="Circuit breaker control">
+            <DOI name="Pos">
+              <DAI name="stVal" sAddr="1001"/>
+              <DAI name="ctlModel"><Val>sbo-with-enhanced-security</Val></DAI>
+              <DAI name="sboTimeout"><Val>30000</Val></DAI>
+            </DOI>
+          </LN>
+          <LN lnClass="XCBR" inst="1" lnType="BCU1_XCBR" desc="Circuit breaker">
+            <DOI name="Pos">
+              <DAI name="stVal" sAddr="io:x1.pos"/>
+              <DAI name="ctlModel"><Val>sbo-with-enhanced-security</Val></DAI>
+              <DAI name="sboTimeout"><Val>30000</Val></DAI>
+            </DOI>
+          </LN>
+          <LN lnClass="GGIO" inst="1" lnType="BCU1_GGIO" desc="Spare I/O">
+            <DOI name="SPCSO1">
+              <DAI name="ctlModel"><Val>direct-with-normal-security</Val></DAI>
+            </DOI>
+            <DOI name="SPCSO2">
+              <DAI name="ctlModel"><Val>sbo-with-normal-security</Val></DAI>
+              <DAI name="sboTimeout"><Val>20000</Val></DAI>
+            </DOI>
+            <DOI name="IntIn1">
+              <DAI name="ctlModel"><Val>direct-with-enhanced-security</Val></DAI>
+              <DAI name="minVal"><Val>0</Val></DAI>
+              <DAI name="maxVal"><Val>100</Val></DAI>
+              <DAI name="stepSize"><Val>1</Val></DAI>
+            </DOI>
+            <rw:Wiring terminal="X2:1"/>
+          </LN>
+          <LN lnClass="MMXU" inst="1" lnType="BCU1_MMXU" desc="Bay measurements">
+            <DOI name="TotW">
+              <SDI name="units">
+                <DAI name="SIUnit"><Val>W</Val></DAI>
+                <DAI name="multiplier"><Val>k</Val></DAI>
+              </SDI>
+              <DAI name="db"><Val>1000</Val></DAI>
+            </DOI>
+            <DOI name="Hz">
+              <SDI name="units">
+                <DAI name="SIUnit"><Val>Hz</Val></DAI>
+              </SDI>
+            </DOI>
+            <DOI name="PhV">
+              <SDI name="phsA">
+                <SDI name="units">
+                  <DAI name="SIUnit"><Val>V</Val></DAI>
+                  <DAI name="multiplier"><Val>k</Val></DAI>
+                </SDI>
+              </SDI>
+            </DOI>
+          </LN>
+        </LDevice>
+        <LDevice inst="PROT" ldName="BAY1_PROT" desc="Bay protection">
+          <LN0 lnClass="LLN0" inst="" lnType="BCU1_LLN0_PROT">
+            <DataSet name="dsProt" desc="Protection events">
+              <FCDA ldInst="PROT" lnClass="PTOC" lnInst="1" doName="Str" fc="ST"/>
+              <FCDA ldInst="PROT" lnClass="PTOC" lnInst="1" doName="Op" fc="ST"/>
+            </DataSet>
+            <DataSet name="dsGoose">
+              <FCDA ldInst="PROT" lnClass="PTOC" lnInst="1" doName="Op" daName="general" fc="ST"/>
+              <FCDA ldInst="PROT" lnClass="PTOC" lnInst="1" doName="Op" daName="q" fc="ST"/>
+            </DataSet>
+            <ReportControl name="brcbProt" rptID="BCU1_Prot" datSet="dsProt" confRev="2" buffered="true" bufTime="50">
+              <TrgOps dchg="true" qchg="true" gi="true"/>
+              <OptFields seqNum="true" timeStamp="true" dataSet="true" reasonCode="true" dataRef="true"
+                         entryID="true" configRef="true"/>
+              <RptEnabled max="2">
+                <ClientLN iedName="SM1" apRef="S1" ldInst="LD0" lnClass="IHMI" lnInst="1"/>
+              </RptEnabled>
+            </ReportControl>
+            <GSEControl name="gcbTrip" datSet="dsGoose" confRev="1" appID="BCU1_PROT_Trip" type="GOOSE"/>
+            <SettingControl numOfSGs="2" actSG="1"/>
+            <DOI name="Mod">
+              <DAI name="stVal"><Val>on</Val></DAI>
+            </DOI>
+            <DOI name="Beh">
+              <DAI name="stVal"><Val>on</Val></DAI>
+            </DOI>
+            <DOI name="Health">
+              <DAI name="stVal"><Val>Ok</Val></DAI>
+            </DOI>
+            <DOI name="NamPlt">
+              <DAI name="vendor"><Val>Rackworks</Val></DAI>
+              <DAI name="swRev"><Val>2.4.1</Val></DAI>
+              <DAI name="d"><Val>Bay 1 protection</Val></DAI>
+              <DAI name="configRev"><Val>BCU1-2026-09-01</Val></DAI>
+              <DAI name="ldNs"><Val>IEC 61850-7-4:2007B</Val></DAI>
+            </DOI>
+          </LN0>
+          <LN lnClass="LPHD" inst="1" lnType="BCU1_LPHD"/>
+          <LN lnClass="PTOC" inst="1" lnType="BCU1_PTOC" desc="Overcurrent stage 1">
+            <DOI name="StrVal">
+              <SDI name="setMag">
+                <DAI name="f"><Val sGroup="1">1.2</Val><Val sGroup="2">1.5</Val></DAI>
+              </SDI>
+              <SDI name="units">
+                <DAI name="SIUnit"><Val>A</Val></DAI>
+              </SDI>
+              <SDI name="minVal"><DAI name="f"><Val>0.1</Val></DAI></SDI>
+              <SDI name="maxVal"><DAI name="f"><Val>10</Val></DAI></SDI>
+              <SDI name="stepSize"><DAI name="f"><Val>0.01</Val></DAI></SDI>
+            </DOI>
+            <DOI name="OpDlTmms">
+              <DAI name="setVal"><Val sGroup="1">100</Val><Val sGroup="2">250</Val></DAI>
+              <DAI name="minVal"><Val>0</Val></DAI>
+              <DAI name="maxVal"><Val>60000</Val></DAI>
+              <DAI name="stepSize"><Val>10</Val></DAI>
+            </DOI>
+          </LN>
+        </LDevice>
+      </Server>
+    </AccessPoint>
+  </IED>
+  <DataTypeTemplates>
+    <!-- Logical node types -->
+    <LNodeType id="BCU1_LLN0_CTRL" lnClass="LLN0">
+      <DO name="Mod" type="BCU1_ENC_Mod"/>
+      <DO name="Beh" type="BCU1_ENS_Beh"/>
+      <DO name="Health" type="BCU1_ENS_Health"/>
+      <DO name="NamPlt" type="BCU1_LPL_LD"/>
+      <DO name="LocKey" type="BCU1_SPS"/>
+      <DO name="LocSta" type="BCU1_SPC_StatusOnly"/>
+    </LNodeType>
+    <LNodeType id="BCU1_LLN0_PROT" lnClass="LLN0">
+      <DO name="Mod" type="BCU1_ENC_Mod"/>
+      <DO name="Beh" type="BCU1_ENS_Beh"/>
+      <DO name="Health" type="BCU1_ENS_Health"/>
+      <DO name="NamPlt" type="BCU1_LPL_LD"/>
+    </LNodeType>
+    <LNodeType id="BCU1_LPHD" lnClass="LPHD">
+      <DO name="PhyNam" type="BCU1_DPL"/>
+      <DO name="PhyHealth" type="BCU1_ENS_Health"/>
+      <DO name="Proxy" type="BCU1_SPS"/>
+    </LNodeType>
+    <LNodeType id="BCU1_CSWI" lnClass="CSWI">
+      <DO name="Beh" type="BCU1_ENS_Beh"/>
+      <DO name="Loc" type="BCU1_SPS"/>
+      <DO name="LocKey" type="BCU1_SPS"/>
+      <DO name="Pos" type="BCU1_DPC_SBOes"/>
+    </LNodeType>
+    <LNodeType id="BCU1_XCBR" lnClass="XCBR">
+      <DO name="Beh" type="BCU1_ENS_Beh"/>
+      <DO name="Loc" type="BCU1_SPS"/>
+      <DO name="OpCnt" type="BCU1_INS"/>
+      <DO name="Pos" type="BCU1_DPC_SBOes"/>
+    </LNodeType>
+    <LNodeType id="BCU1_GGIO" lnClass="GGIO">
+      <DO name="Beh" type="BCU1_ENS_Beh"/>
+      <DO name="Ind1" type="BCU1_SPS"/>
+      <DO name="SPCSO1" type="BCU1_SPC_DirNorm"/>
+      <DO name="SPCSO2" type="BCU1_SPC_SboNorm"/>
+      <DO name="IntIn1" type="BCU1_INC_DirEnh"/>
+    </LNodeType>
+    <LNodeType id="BCU1_MMXU" lnClass="MMXU">
+      <DO name="Beh" type="BCU1_ENS_Beh"/>
+      <DO name="TotW" type="BCU1_MV"/>
+      <DO name="Hz" type="BCU1_MV"/>
+      <DO name="PhV" type="BCU1_WYE"/>
+    </LNodeType>
+    <LNodeType id="BCU1_PTOC" lnClass="PTOC">
+      <DO name="Beh" type="BCU1_ENS_Beh"/>
+      <DO name="Str" type="BCU1_ACD"/>
+      <DO name="Op" type="BCU1_ACT" transient="true"/>
+      <DO name="StrVal" type="BCU1_ASG"/>
+      <DO name="OpDlTmms" type="BCU1_ING"/>
+    </LNodeType>
+    <!-- Data object types -->
+    <DOType id="BCU1_ENC_Mod" cdc="ENC">
+      <DA name="stVal" bType="Enum" type="BehModKind" fc="ST" dchg="true"/>
+      <DA name="q" bType="Quality" fc="ST" qchg="true"/>
+      <DA name="t" bType="Timestamp" fc="ST"/>
+      <DA name="ctlModel" bType="Enum" type="CtlModelKind" fc="CF" dchg="true"><Val>status-only</Val></DA>
+    </DOType>
+    <DOType id="BCU1_ENS_Beh" cdc="ENS">
+      <DA name="stVal" bType="Enum" type="BehModKind" fc="ST" dchg="true"/>
+      <DA name="q" bType="Quality" fc="ST" qchg="true"/>
+      <DA name="t" bType="Timestamp" fc="ST"/>
+    </DOType>
+    <DOType id="BCU1_ENS_Health" cdc="ENS">
+      <DA name="stVal" bType="Enum" type="HealthKind" fc="ST" dchg="true"/>
+      <DA name="q" bType="Quality" fc="ST" qchg="true"/>
+      <DA name="t" bType="Timestamp" fc="ST"/>
+    </DOType>
+    <DOType id="BCU1_LPL_LD" cdc="LPL">
+      <DA name="vendor" bType="VisString255" fc="DC"/>
+      <DA name="swRev" bType="VisString255" fc="DC"/>
+      <DA name="d" bType="VisString255" fc="DC"/>
+      <DA name="configRev" bType="VisString255" fc="DC"/>
+      <DA name="ldNs" bType="VisString255" fc="EX"/>
+    </DOType>
+    <DOType id="BCU1_DPL" cdc="DPL">
+      <DA name="vendor" bType="VisString255" fc="DC"/>
+      <DA name="hwRev" bType="VisString255" fc="DC"/>
+      <DA name="swRev" bType="VisString255" fc="DC"/>
+      <DA name="serNum" bType="VisString255" fc="DC"/>
+      <DA name="model" bType="VisString255" fc="DC"/>
+    </DOType>
+    <DOType id="BCU1_SPS" cdc="SPS">
+      <DA name="stVal" bType="BOOLEAN" fc="ST" dchg="true"/>
+      <DA name="q" bType="Quality" fc="ST" qchg="true"/>
+      <DA name="t" bType="Timestamp" fc="ST"/>
+    </DOType>
+    <DOType id="BCU1_INS" cdc="INS">
+      <DA name="stVal" bType="INT32" fc="ST" dchg="true"/>
+      <DA name="q" bType="Quality" fc="ST" qchg="true"/>
+      <DA name="t" bType="Timestamp" fc="ST"/>
+    </DOType>
+    <DOType id="BCU1_SPC_StatusOnly" cdc="SPC">
+      <DA name="stVal" bType="BOOLEAN" fc="ST" dchg="true"/>
+      <DA name="q" bType="Quality" fc="ST" qchg="true"/>
+      <DA name="t" bType="Timestamp" fc="ST"/>
+      <DA name="ctlModel" bType="Enum" type="CtlModelKind" fc="CF" dchg="true"><Val>status-only</Val></DA>
+    </DOType>
+    <DOType id="BCU1_DPC_SBOes" cdc="DPC">
+      <DA name="SBOw" bType="Struct" type="BCU1_Oper_BOOLEAN" fc="CO"/>
+      <DA name="Oper" bType="Struct" type="BCU1_Oper_BOOLEAN" fc="CO"/>
+      <DA name="Cancel" bType="Struct" type="BCU1_Cancel_BOOLEAN" fc="CO"/>
+      <DA name="origin" bType="Struct" type="BCU1_Originator" fc="ST"/>
+      <DA name="ctlNum" bType="INT8U" fc="ST"/>
+      <DA name="stVal" bType="Dbpos" fc="ST" dchg="true"/>
+      <DA name="q" bType="Quality" fc="ST" qchg="true"/>
+      <DA name="t" bType="Timestamp" fc="ST"/>
+      <DA name="stSeld" bType="BOOLEAN" fc="ST" dchg="true"/>
+      <DA name="ctlModel" bType="Enum" type="CtlModelKind" fc="CF" dchg="true"><Val>status-only</Val></DA>
+      <DA name="sboTimeout" bType="INT32U" fc="CF" dchg="true"><Val>10000</Val></DA>
+      <DA name="sboClass" bType="Enum" type="SboClassKind" fc="CF" dchg="true"><Val>operate-once</Val></DA>
+    </DOType>
+    <DOType id="BCU1_SPC_DirNorm" cdc="SPC">
+      <DA name="Oper" bType="Struct" type="BCU1_Oper_BOOLEAN" fc="CO"/>
+      <DA name="origin" bType="Struct" type="BCU1_Originator" fc="ST"/>
+      <DA name="ctlNum" bType="INT8U" fc="ST"/>
+      <DA name="stVal" bType="BOOLEAN" fc="ST" dchg="true"/>
+      <DA name="q" bType="Quality" fc="ST" qchg="true"/>
+      <DA name="t" bType="Timestamp" fc="ST"/>
+      <DA name="ctlModel" bType="Enum" type="CtlModelKind" fc="CF" dchg="true"><Val>direct-with-normal-security</Val></DA>
+    </DOType>
+    <DOType id="BCU1_SPC_SboNorm" cdc="SPC">
+      <DA name="SBO" bType="ObjRef" fc="CO"/>
+      <DA name="Oper" bType="Struct" type="BCU1_Oper_BOOLEAN" fc="CO"/>
+      <DA name="Cancel" bType="Struct" type="BCU1_Cancel_BOOLEAN" fc="CO"/>
+      <DA name="origin" bType="Struct" type="BCU1_Originator" fc="ST"/>
+      <DA name="ctlNum" bType="INT8U" fc="ST"/>
+      <DA name="stVal" bType="BOOLEAN" fc="ST" dchg="true"/>
+      <DA name="q" bType="Quality" fc="ST" qchg="true"/>
+      <DA name="t" bType="Timestamp" fc="ST"/>
+      <DA name="ctlModel" bType="Enum" type="CtlModelKind" fc="CF" dchg="true"><Val>status-only</Val></DA>
+      <DA name="sboTimeout" bType="INT32U" fc="CF" dchg="true"><Val>10000</Val></DA>
+    </DOType>
+    <DOType id="BCU1_INC_DirEnh" cdc="INC">
+      <DA name="Oper" bType="Struct" type="BCU1_Oper_INT32" fc="CO"/>
+      <DA name="origin" bType="Struct" type="BCU1_Originator" fc="ST"/>
+      <DA name="ctlNum" bType="INT8U" fc="ST"/>
+      <DA name="stVal" bType="INT32" fc="ST" dchg="true"/>
+      <DA name="q" bType="Quality" fc="ST" qchg="true"/>
+      <DA name="t" bType="Timestamp" fc="ST"/>
+      <DA name="ctlModel" bType="Enum" type="CtlModelKind" fc="CF" dchg="true"><Val>status-only</Val></DA>
+      <DA name="minVal" bType="INT32" fc="CF" dchg="true"/>
+      <DA name="maxVal" bType="INT32" fc="CF" dchg="true"/>
+      <DA name="stepSize" bType="INT32U" fc="CF" dchg="true"/>
+    </DOType>
+    <DOType id="BCU1_MV" cdc="MV">
+      <DA name="mag" bType="Struct" type="BCU1_AnalogueValue" fc="MX" dchg="true" dupd="true"/>
+      <DA name="q" bType="Quality" fc="MX" qchg="true"/>
+      <DA name="t" bType="Timestamp" fc="MX"/>
+      <DA name="units" bType="Struct" type="BCU1_Unit" fc="CF" dchg="true"/>
+      <DA name="db" bType="INT32U" fc="CF" dchg="true"><Val>500</Val></DA>
+    </DOType>
+    <DOType id="BCU1_CMV" cdc="CMV">
+      <DA name="cVal" bType="Struct" type="BCU1_Vector" fc="MX" dchg="true" dupd="true"/>
+      <DA name="q" bType="Quality" fc="MX" qchg="true"/>
+      <DA name="t" bType="Timestamp" fc="MX"/>
+      <DA name="units" bType="Struct" type="BCU1_Unit" fc="CF" dchg="true"/>
+      <DA name="db" bType="INT32U" fc="CF" dchg="true"/>
+    </DOType>
+    <DOType id="BCU1_WYE" cdc="WYE">
+      <SDO name="phsA" type="BCU1_CMV"/>
+      <SDO name="phsB" type="BCU1_CMV"/>
+      <SDO name="phsC" type="BCU1_CMV"/>
+    </DOType>
+    <DOType id="BCU1_ACD" cdc="ACD">
+      <DA name="general" bType="BOOLEAN" fc="ST" dchg="true"/>
+      <DA name="dirGeneral" bType="Enum" type="FaultDirectionKind" fc="ST" dchg="true"/>
+      <DA name="phsA" bType="BOOLEAN" fc="ST" dchg="true"/>
+      <DA name="phsB" bType="BOOLEAN" fc="ST" dchg="true"/>
+      <DA name="phsC" bType="BOOLEAN" fc="ST" dchg="true"/>
+      <DA name="q" bType="Quality" fc="ST" qchg="true"/>
+      <DA name="t" bType="Timestamp" fc="ST"/>
+    </DOType>
+    <DOType id="BCU1_ACT" cdc="ACT">
+      <DA name="general" bType="BOOLEAN" fc="ST" dchg="true"/>
+      <DA name="q" bType="Quality" fc="ST" qchg="true"/>
+      <DA name="t" bType="Timestamp" fc="ST"/>
+    </DOType>
+    <DOType id="BCU1_ASG" cdc="ASG">
+      <DA name="setMag" bType="Struct" type="BCU1_AnalogueValue" fc="SG" dchg="true"/>
+      <DA name="units" bType="Struct" type="BCU1_Unit" fc="CF" dchg="true"/>
+      <DA name="minVal" bType="Struct" type="BCU1_AnalogueValue" fc="CF" dchg="true"/>
+      <DA name="maxVal" bType="Struct" type="BCU1_AnalogueValue" fc="CF" dchg="true"/>
+      <DA name="stepSize" bType="Struct" type="BCU1_AnalogueValue" fc="CF" dchg="true"/>
+    </DOType>
+    <DOType id="BCU1_ING" cdc="ING">
+      <DA name="setVal" bType="INT32" fc="SG" dchg="true"/>
+      <DA name="minVal" bType="INT32" fc="CF" dchg="true"/>
+      <DA name="maxVal" bType="INT32" fc="CF" dchg="true"/>
+      <DA name="stepSize" bType="INT32U" fc="CF" dchg="true"/>
+    </DOType>
+    <!-- Constructed attribute types -->
+    <DAType id="BCU1_Originator">
+      <BDA name="orCat" bType="Enum" type="OrCatKind"/>
+      <BDA name="orIdent" bType="Octet64"/>
+    </DAType>
+    <DAType id="BCU1_Oper_BOOLEAN">
+      <BDA name="ctlVal" bType="BOOLEAN"/>
+      <BDA name="origin" bType="Struct" type="BCU1_Originator"/>
+      <BDA name="ctlNum" bType="INT8U"/>
+      <BDA name="T" bType="Timestamp"/>
+      <BDA name="Test" bType="BOOLEAN"/>
+      <BDA name="Check" bType="Check"/>
+    </DAType>
+    <DAType id="BCU1_Cancel_BOOLEAN">
+      <BDA name="ctlVal" bType="BOOLEAN"/>
+      <BDA name="origin" bType="Struct" type="BCU1_Originator"/>
+      <BDA name="ctlNum" bType="INT8U"/>
+      <BDA name="T" bType="Timestamp"/>
+      <BDA name="Test" bType="BOOLEAN"/>
+    </DAType>
+    <DAType id="BCU1_Oper_INT32">
+      <BDA name="ctlVal" bType="INT32"/>
+      <BDA name="origin" bType="Struct" type="BCU1_Originator"/>
+      <BDA name="ctlNum" bType="INT8U"/>
+      <BDA name="T" bType="Timestamp"/>
+      <BDA name="Test" bType="BOOLEAN"/>
+      <BDA name="Check" bType="Check"/>
+    </DAType>
+    <DAType id="BCU1_AnalogueValue">
+      <BDA name="f" bType="FLOAT32"/>
+    </DAType>
+    <DAType id="BCU1_Vector">
+      <BDA name="mag" bType="Struct" type="BCU1_AnalogueValue"/>
+      <BDA name="ang" bType="Struct" type="BCU1_AnalogueValue"/>
+    </DAType>
+    <DAType id="BCU1_Unit">
+      <BDA name="SIUnit" bType="Enum" type="SIUnitKind"/>
+      <BDA name="multiplier" bType="Enum" type="MultiplierKind"><Val></Val></BDA>
+    </DAType>
+    <!-- Enumerations -->
+    <EnumType id="BehModKind">
+      <EnumVal ord="1">on</EnumVal>
+      <EnumVal ord="2">blocked</EnumVal>
+      <EnumVal ord="3">test</EnumVal>
+      <EnumVal ord="4">test/blocked</EnumVal>
+      <EnumVal ord="5">off</EnumVal>
+    </EnumType>
+    <EnumType id="HealthKind">
+      <EnumVal ord="1">Ok</EnumVal>
+      <EnumVal ord="2">Warning</EnumVal>
+      <EnumVal ord="3">Alarm</EnumVal>
+    </EnumType>
+    <EnumType id="CtlModelKind">
+      <EnumVal ord="0">status-only</EnumVal>
+      <EnumVal ord="1">direct-with-normal-security</EnumVal>
+      <EnumVal ord="2">sbo-with-normal-security</EnumVal>
+      <EnumVal ord="3">direct-with-enhanced-security</EnumVal>
+      <EnumVal ord="4">sbo-with-enhanced-security</EnumVal>
+    </EnumType>
+    <EnumType id="SboClassKind">
+      <EnumVal ord="0">operate-once</EnumVal>
+      <EnumVal ord="1">operate-many</EnumVal>
+    </EnumType>
+    <EnumType id="OrCatKind">
+      <EnumVal ord="0">not-supported</EnumVal>
+      <EnumVal ord="1">bay-control</EnumVal>
+      <EnumVal ord="2">station-control</EnumVal>
+      <EnumVal ord="3">remote-control</EnumVal>
+      <EnumVal ord="4">automatic-bay</EnumVal>
+      <EnumVal ord="5">automatic-station</EnumVal>
+      <EnumVal ord="6">automatic-remote</EnumVal>
+      <EnumVal ord="7">maintenance</EnumVal>
+      <EnumVal ord="8">process</EnumVal>
+    </EnumType>
+    <EnumType id="FaultDirectionKind">
+      <EnumVal ord="0">unknown</EnumVal>
+      <EnumVal ord="1">forward</EnumVal>
+      <EnumVal ord="2">backward</EnumVal>
+      <EnumVal ord="3">both</EnumVal>
+    </EnumType>
+    <EnumType id="SIUnitKind">
+      <EnumVal ord="1"></EnumVal>
+      <EnumVal ord="4">s</EnumVal>
+      <EnumVal ord="5">A</EnumVal>
+      <EnumVal ord="29">V</EnumVal>
+      <EnumVal ord="33">Hz</EnumVal>
+      <EnumVal ord="38">W</EnumVal>
+    </EnumType>
+    <EnumType id="MultiplierKind">
+      <EnumVal ord="-6">µ</EnumVal>
+      <EnumVal ord="-3">m</EnumVal>
+      <EnumVal ord="0"></EnumVal>
+      <EnumVal ord="3">k</EnumVal>
+      <EnumVal ord="6">M</EnumVal>
+    </EnumType>
+  </DataTypeTemplates>
+</SCL>

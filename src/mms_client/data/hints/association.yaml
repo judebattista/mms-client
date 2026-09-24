@@ -1,0 +1,435 @@
+# Association outcomes (the tool's own classification, DIA-3/DIA-4/DIA-6) and ACSE diagnostics.
+# Format: see the header of data/hints.yaml.
+#
+# The association outcome keys come from `diagnose` and the connect path, which probe below the
+# protocol library to find the layer that failed. Context tags used here:
+#   pattern: "refused-after-abrupt-disconnect"   a client (maybe this tool) dropped its association
+#                                                without releasing it shortly before
+#   bound_ip: "yes" | "no"                       whether the attempt used a chosen local IP (--as)
+
+version: 1
+entries:
+
+- id: association.accepted
+  keys: [association:accepted]
+  title: Association accepted
+  summary: The device accepted the association.
+  details: |
+    The association now occupies one of the device's association slots until it is released.
+  related: [concept.association-slots]
+  hint: "The association was accepted"
+  certainty: fact
+
+- id: association.host-unreachable
+  keys: [association:host-unreachable]
+  title: Host unreachable
+  summary: The device's address cannot be reached from this computer at all.
+  details: |
+    The problem is below MMS: addressing, routing or cabling. On a test rack, typical causes are a
+    laptop on the wrong subnet or VLAN, a device renumbered for the new experiment, or a cable in
+    the wrong switch port.
+  next_checks:
+    - "Compare the device's IP in the inventory with its front panel or configuration"
+    - "Check this computer's address and subnet (`ip addr`) and that it can ping something on the rack"
+    - "Check cabling and switch port / VLAN"
+  related: [check:address-mismatch, concept.iso-stack]
+  hint: "the device IP in the inventory, this computer's subnet (`ip addr`) and cabling/VLAN; the address is not reachable at all"
+  certainty: check
+
+- id: association.tcp-refused
+  keys: [association:tcp-refused]
+  title: TCP connection refused
+  summary: >-
+    The device is reachable but actively refused the connection on the MMS port (TCP 102).
+  details: |
+    Something answered with a refusal. Possible reasons:
+    - the MMS server on this address is disabled or not running (e.g. still starting up)
+    - the address belongs to a different device, or MMS listens on another port
+    - the device refuses new connections because all association slots are taken
+    - the device filters clients by source IP and refuses unknown ones this way
+  next_checks:
+    - "Run `diagnose <device>` to check ICMP and the port, and to look for TLS on port 3782"
+    - "Check whether other clients are connected (association slots)"
+    - "Try as a known client with `--as <client>`"
+  related: [concept.association-slots, association:tls-suspected, concept.acting-as-client]
+  hint: "the MMS server, address and port with `diagnose <device>`; the device refuses connections (server disabled, wrong address or port, slots full or client filtered)"
+  certainty: check
+
+- id: association.tcp-timeout
+  keys: [association:tcp-timeout]
+  title: TCP connection attempt unanswered
+  summary: Nothing answered the connection request on the MMS port.
+  details: |
+    Silence (rather than a refusal) usually means a firewall or filter drops the packets, or the
+    address is wrong. Some devices silently drop connection attempts from clients they do not know.
+  next_checks:
+    - "Ping the device; if ping works but TCP 102 is silent, suspect filtering"
+    - "Try as a known client with `--as <client>`"
+    - "Check any firewall on this computer"
+  related: [concept.acting-as-client, association:host-unreachable]
+  hint: "A firewall, a source-IP filter or a wrong address drops the connection attempts; ping the device and try `--as <client>`"
+  certainty: likely
+
+- id: association.tcp-closed-immediately
+  keys: [association:tcp-closed-immediately]
+  title: Connection closed at once
+  summary: The device accepted the TCP connection and then closed it before answering anything.
+  details: |
+    The device lets the connection in, looks at it, and decides not to serve it. Frequent reasons:
+    no free association slot, or a source IP that is not on the device's list of allowed clients.
+  next_checks:
+    - "Try as a known client with `--as <client>`"
+    - "Check how many clients are connected; the tool itself uses one slot"
+  related: [concept.association-slots, concept.acting-as-client, tool:slots-probably-exhausted]
+  hint: "No free association slot, or a source IP the device does not accept (it closed the connection before answering)"
+  certainty: likely
+
+- id: association.cotp-rejected
+  keys: [association:cotp-rejected]
+  title: Transport connection rejected (COTP)
+  summary: The device refused the ISO transport connection request.
+  details: |
+    The request carries a transport selector (TSEL). Many devices accept any value, but some insist on
+    the configured one. Resource shortage can also cause this.
+  next_checks:
+    - "Compare the transport selector with the device's SCL (ConnectedAP address, OSI-TSEL)"
+    - "Check how many clients are connected"
+  related: [concept.iso-stack]
+  hint: "A transport selector (TSEL) the device does not accept, or no free association slot; compare TSEL with the device's SCL"
+  certainty: likely
+
+- id: association.cotp-no-response
+  keys: [association:cotp-no-response]
+  title: No answer to the transport connection request
+  summary: TCP was accepted, but the device did not answer the ISO transport connection request.
+  next_checks:
+    - "Run `diagnose <device>` again to see if it is repeatable"
+    - "Check whether the port really belongs to an MMS server"
+  related: [concept.iso-stack]
+  hint: "that port 102 really is this device's MMS server; TCP connected but the ISO transport request got no answer"
+  certainty: check
+
+- id: association.cotp-invalid-response
+  keys: [association:cotp-invalid-response]
+  title: Transport response not understood
+  summary: The device's answer to the ISO transport connection request could not be understood.
+  next_checks:
+    - "Capture the exchange with Wireshark"
+    - "Check that port 102 belongs to an MMS server and not to another ISO-on-TCP service"
+  related: [concept.iso-stack, scope.passive-capture]
+  hint: "that port 102 is an MMS server, and capture the exchange with Wireshark; the transport answer was not understood"
+  certainty: check
+
+- id: association.session-refused
+  keys: [association:session-refused]
+  title: Session refused
+  summary: The device refused the ISO session connection.
+  details: |
+    The request carries a session selector (SSEL). Some devices insist on the configured one.
+  next_checks:
+    - "Compare the session selector with the device's SCL (OSI-SSEL)"
+  related: [concept.iso-stack]
+  hint: "A session selector (SSEL) the device does not accept; compare it with the device's SCL"
+  certainty: likely
+
+- id: association.session-aborted
+  keys: [association:session-aborted]
+  title: Session aborted
+  summary: The device aborted the ISO session while the association was being set up.
+  next_checks:
+    - "Run `diagnose <device>` again; check free association slots and addressing values"
+  related: [concept.iso-stack, concept.association-slots]
+  hint: "free association slots and the addressing values in the SCL; the device aborted the session during set-up"
+  certainty: check
+
+- id: association.presentation-rejected
+  keys: [association:presentation-rejected]
+  title: Presentation connection rejected
+  summary: The device rejected the presentation layer connection.
+  details: |
+    The request carries a presentation selector (PSEL) and a description of the protocols in use.
+    Some devices insist on the configured selector.
+  next_checks:
+    - "Compare the presentation selector with the device's SCL (OSI-PSEL)"
+  related: [concept.iso-stack]
+  hint: "A presentation selector (PSEL) the device does not accept; compare it with the device's SCL"
+  certainty: likely
+
+- id: association.acse-rejected-permanent
+  keys: [association:acse-rejected-permanent]
+  title: Association rejected (permanent)
+  summary: >-
+    The device rejected the association and indicated that retrying the same request will not help.
+  details: |
+    The ACSE diagnostic that comes with the rejection usually says why: unknown addressing values
+    (AP title, AE qualifier), or authentication required. `diagnose` shows it.
+  next_checks:
+    - "Run `explain` on the ACSE diagnostic shown with the rejection"
+    - "Compare AP title and AE qualifier with the device's SCL"
+  related: [concept.acse, acse-diag:authentication-required, acse-diag:called-ap-title-not-recognized]
+  hint: "the ACSE diagnostic shown with the rejection (addressing or authentication); the device rejected the association for good"
+  certainty: check
+
+- id: association.acse-rejected-transient
+  keys: [association:acse-rejected-transient]
+  title: Association rejected (temporary)
+  summary: The device rejected the association but indicated that a later retry may succeed.
+  details: |
+    A temporary rejection usually means the device is short of resources, most often association
+    slots.
+  next_checks:
+    - "Check how many clients are connected; the tool itself uses one slot"
+    - "Wait a few minutes (stale associations time out) and retry"
+  related: [concept.association-slots, tool:slots-probably-exhausted]
+  hint: "The device is temporarily out of resources, most often association slots; check connected clients and retry later"
+  certainty: likely
+
+- id: association.acse-aborted
+  keys: [association:acse-aborted]
+  title: Association aborted
+  summary: The device aborted the association while it was being set up.
+  next_checks:
+    - "Run `diagnose <device>`; check free association slots and whether the device needs authentication"
+  related: [concept.acse, concept.association-slots]
+  hint: "free association slots and whether the device requires authentication; it aborted the association during set-up"
+  certainty: check
+
+- id: association.initiate-error
+  keys: [association:initiate-error]
+  title: MMS initiate rejected
+  summary: The device refused the MMS-level parameters of the association.
+  details: |
+    The MMS initiate agrees the maximum message size, the number of outstanding requests and the
+    services both sides support. A refusal can mean the device did not accept the proposed values;
+    some devices also answer this way when they have no free association slot.
+  next_checks:
+    - "Run `diagnose <device>` to see the proposed and accepted parameters"
+    - "Check how many clients are connected"
+  related: [concept.mms-initiate, concept.pdu-size, concept.association-slots]
+  hint: "MMS initiate parameters the device does not accept (PDU size, services), or no free slot; run `diagnose <device>`"
+  certainty: likely
+
+- id: association.initiate-no-response
+  keys: [association:initiate-no-response]
+  title: No answer to the association request
+  summary: The lower layers connected, but the device did not answer the association (MMS initiate).
+  next_checks:
+    - "Run `diagnose <device>` again; check whether the device is busy or out of association slots"
+  related: [concept.mms-initiate, concept.association-slots]
+  hint: "The device is busy or out of association slots (it did not answer the association request)"
+  certainty: likely
+
+- id: association.invalid-response
+  keys: [association:invalid-response]
+  title: Association answer not understood
+  summary: The device's answer to the association request could not be understood.
+  next_checks:
+    - "Capture the exchange with Wireshark and record it as a device quirk"
+  related: [scope.passive-capture, ied:malformed-message]
+  hint: "An implementation difference or device quirk (the association answer could not be decoded); capture it with Wireshark"
+  certainty: likely
+
+- id: association.accepted-then-closed
+  keys: [association:accepted-then-closed]
+  title: Accepted, then closed
+  summary: The device accepted the association and closed it again shortly afterwards.
+  details: |
+    Some devices accept first and check afterwards. Common reasons: the slot limit is enforced after
+    acceptance, the client's source IP is not allowed, or the device dislikes something in the first
+    request.
+  next_checks:
+    - "Try as a known client with `--as <client>`"
+    - "Check how many clients are connected; the tool itself uses one slot"
+  related: [concept.association-slots, concept.acting-as-client]
+  hint: "A slot limit enforced after acceptance, or a source IP the device does not accept (it accepted, then dropped the association)"
+  certainty: likely
+
+- id: association.tls-suspected
+  keys: [association:tls-suspected]
+  title: Device seems to require TLS
+  summary: >-
+    The normal MMS port (TCP 102) is closed but the port used for MMS over TLS (TCP 3782) is open.
+  details: |
+    That pattern suggests the device only accepts secured connections (IEC 62351). This tool does
+    not support TLS in v1, so it cannot talk to the device in that configuration.
+  next_checks:
+    - "Check the device's communication security settings"
+    - "Use a client that supports IEC 62351 TLS, or enable unsecured MMS on the device for the test"
+  related: [scope.security, tool:security-not-supported]
+  hint: "The device requires TLS (IEC 62351), which this tool does not support in v1 (port 102 closed, TLS port 3782 open)"
+  certainty: likely
+
+- id: association.authentication-suspected
+  keys: [association:authentication-suspected]
+  title: Device seems to require authentication
+  summary: The way the association was rejected suggests the device requires ACSE authentication.
+  details: |
+    This tool does not support ACSE authentication in v1, so it cannot associate with a device that
+    insists on it.
+  next_checks:
+    - "Check the device's access and authentication settings"
+    - "Use a client that supports authentication, or disable it on the device for the test"
+  related: [scope.security, tool:security-not-supported]
+  hint: "The device requires ACSE authentication, which this tool does not support in v1 (judged from the rejection pattern)"
+  certainty: likely
+
+- id: association.timeout
+  keys: [association:timeout]
+  title: Association timed out
+  summary: The association attempt did not complete in time.
+  next_checks:
+    - "Run `diagnose <device>` to see which layer stays silent"
+  related: [ied:timeout]
+  hint: "which layer stays silent, with `diagnose <device>`; the association did not complete in time"
+  certainty: check
+
+- id: association.unknown
+  keys: [association:unknown]
+  title: Association failed (unknown reason)
+  summary: The association failed and the tool could not classify how.
+  next_checks:
+    - "Run `diagnose <device>`"
+    - "Capture the attempt with Wireshark and save an incident file"
+  related: [scope.passive-capture]
+  hint: "`diagnose <device>` and a Wireshark capture of the attempt; the tool could not classify this failure"
+  certainty: check
+
+# -----------------------------------------------------------------------------------------------------
+# Context variants shared by several refusal outcomes
+# -----------------------------------------------------------------------------------------------------
+- id: association.refusal.stale-association
+  keys: &refusals
+    - ied:connection-rejected
+    - mms:connection-rejected
+    - association:tcp-refused
+    - association:tcp-closed-immediately
+    - association:accepted-then-closed
+    - association:initiate-error
+    - association:initiate-no-response
+    - association:acse-rejected-transient
+    - association:acse-aborted
+    - association:session-aborted
+  when: {tags: {pattern: refused-after-abrupt-disconnect}}
+  priority: 1   # the observed pattern outranks the general source-IP advice below
+  title: Refused after an abrupt disconnect
+  summary: >-
+    The refusal follows a client dropping its association without releasing it. The device
+    probably still counts that association and has no free slot until it times it out.
+  details: |
+    Devices only notice a vanished client when their own supervision (keep-alive or idle timeout)
+    fires, which can take from seconds to many minutes. Until then the stale association keeps its
+    slot. The protocol offers no way to ask the device how many slots it has or which are in use.
+  next_checks:
+    - "Wait for the device's slot-release time (shown by `diagnose` if the quirks file knows it) and retry"
+    - "Ask other operators to release their sessions; restarting the device frees all slots"
+  related: [concept.association-slots, tool:slots-probably-exhausted, tool:association-slot-occupied-by-tool]
+  hint: "A client that disconnected abruptly still holds an association slot until the device times it out; wait and retry"
+  certainty: likely
+
+- id: association.refusal.unbound
+  keys: *refusals
+  when: {tags: {bound_ip: "no"}}
+  hint: "whether the device accepts only known client addresses; retry as a configured client with `--as <client>` (binds its source IP)"
+  certainty: check
+
+- id: association.refusal.bound
+  keys: *refusals
+  when: {tags: {bound_ip: "yes"}}
+  hint: "whether the device lists {local_ip} among its allowed clients (it may check more than the address)"
+  certainty: check
+
+# -----------------------------------------------------------------------------------------------------
+# ACSE result-source-diagnostic (service user)
+# -----------------------------------------------------------------------------------------------------
+- id: acse-diag.null
+  keys: [acse-diag:null]
+  title: No ACSE diagnostic
+  summary: The association answer carried no diagnostic.
+  hint: "No ACSE diagnostic was given"
+  certainty: fact
+
+- id: acse-diag.no-reason-given
+  keys: [acse-diag:no-reason-given]
+  title: "ACSE: no reason given"
+  summary: The device rejected the association without saying why.
+  details: |
+    Full association slots and client filtering are the usual causes when no reason is given.
+  next_checks:
+    - "Run `diagnose <device>`"
+    - "Check how many clients are connected and try `--as <client>`"
+  related: [concept.association-slots, concept.acting-as-client]
+  hint: "Full association slots or client filtering (the device gave no reason); check connected clients and try `--as <client>`"
+  certainty: likely
+
+- id: acse-diag.application-context-name-not-supported
+  keys: [acse-diag:application-context-name-not-supported]
+  title: "ACSE: application context not supported"
+  summary: The device did not accept the application context (the protocol identity) in the request.
+  details: |
+    Every MMS client sends the same standard context, so this is unusual and points to a device that
+    expects something non-standard.
+  next_checks:
+    - "Capture the exchange with Wireshark and record a device quirk"
+  related: [concept.acse, scope.passive-capture]
+  hint: "A device expecting a non-standard application context (unusual); capture it with Wireshark and record a device quirk"
+  certainty: likely
+
+- id: acse-diag.calling
+  keys:
+    - acse-diag:calling-ap-title-not-recognized
+    - acse-diag:calling-ap-invocation-identifier-not-recognized
+    - acse-diag:calling-ae-qualifier-not-recognized
+    - acse-diag:calling-ae-invocation-identifier-not-recognized
+  title: "ACSE: caller not recognised"
+  summary: >-
+    The device checks the identity the client presents (its AP title, AE qualifier or invocation
+    identifiers) and did not recognise the values this tool sent.
+  details: |
+    Most devices ignore these values, but some only accept clients whose identity is configured,
+    typically from the SCD. The client's values are in the SCD's communication section for the
+    client's access point.
+  next_checks:
+    - "Look up the calling identity the device expects (SCD, or the device's client list)"
+    - "Try as that client with `--as <client>` if the inventory holds its identity"
+  related: [concept.acse, concept.acting-as-client]
+  hint: "The device does not recognise the identity this tool presents (AP title/AE qualifier); use the calling values it expects (SCD, `--as <client>`)"
+  certainty: likely
+
+- id: acse-diag.called
+  keys:
+    - acse-diag:called-ap-title-not-recognized
+    - acse-diag:called-ap-invocation-identifier-not-recognized
+    - acse-diag:called-ae-qualifier-not-recognized
+    - acse-diag:called-ae-invocation-identifier-not-recognized
+  title: "ACSE: called address not recognised"
+  summary: >-
+    The device did not recognise the identity (AP title, AE qualifier or invocation identifiers) the
+    tool used to address it.
+  details: |
+    The device's own values are in its SCL, in the communication section (ConnectedAP address,
+    OSI-AP-Title and OSI-AE-Qualifier). Most devices ignore them, some insist.
+  next_checks:
+    - "Compare the called AP title and AE qualifier with the device's SCL"
+  related: [concept.acse, concept.iso-stack]
+  hint: "The device does not recognise how it was addressed; compare the called AP title and AE qualifier with its SCL (OSI-AP-Title, OSI-AE-Qualifier)"
+  certainty: likely
+
+- id: acse-diag.authentication
+  keys:
+    - acse-diag:authentication-mechanism-name-not-recognized
+    - acse-diag:authentication-mechanism-name-required
+    - acse-diag:authentication-failure
+    - acse-diag:authentication-required
+  title: "ACSE: authentication"
+  summary: >-
+    The device's rejection concerns authentication: it requires it, does not know the mechanism
+    offered, or the credentials failed.
+  details: |
+    This tool does not support ACSE authentication in v1 (it sends none), so it cannot associate
+    with a device that requires it. The inventory reserves a `security` block for a later version.
+  next_checks:
+    - "Check the device's authentication settings"
+    - "Use a client that supports authentication, or disable it on the device for the test"
+  related: [scope.security, tool:security-not-supported, association:authentication-suspected]
+  hint: "The device's answer concerns ACSE authentication, which this tool does not support (v1)"
+  certainty: fact

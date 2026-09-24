@@ -1,0 +1,607 @@
+# Tool-level codes: refusals and failures raised by mms-client itself (policy, input, sequencing).
+# Format: see the header of data/hints.yaml.
+#
+# These are decided by the tool, so `fact` is appropriate when the text only states what the tool
+# knows. Placeholders such as {local_ip} are filled from HintContext.tags when the caller supplies
+# them, otherwise shown as <local_ip>.
+
+version: 1
+entries:
+
+- id: tool.unlisted
+  keys: ["tool:*"]
+  title: Tool condition without a catalogue entry
+  summary: The tool reported a condition that has no entry in this catalogue yet.
+  next_checks:
+    - "Read the full message printed with it; save an incident file with `export --incident` if unclear"
+  related: [code.unlisted]
+  hint: "the message printed with it; this tool condition has no catalogue entry yet"
+  certainty: check
+
+- id: tool.refused-standard-mode
+  keys: [tool:refused-standard-mode]
+  title: Needs expert mode
+  summary: The action is only allowed in expert mode, and the tool is in standard mode.
+  details: |
+    Standard mode allows browsing, reads, writes to normally writable values, controls with
+    interlock and synchrocheck checks on and orCat bay/station/remote, and subscribing to free
+    report control blocks. Expert mode adds RCB takeover, turning checks off, other orCat values,
+    and writes to values that are not normally writable (for negative testing).
+
+    Modes are a guardrail against mistakes, not access control.
+  next_checks:
+    - "If the action is intended, start with `--expert` or run `set mode expert` in the shell"
+  related: [concept.tool-modes]
+  hint: "This action needs expert mode (`--expert`, or `set mode expert` in the shell)"
+  certainty: fact
+
+- id: tool.write-type-unsupported
+  keys: [tool:write-type-unsupported]
+  title: Value type cannot be written safely
+  summary: >-
+    The tool refused the write because the attribute's type, as taken from the device's model, is
+    ambiguous or not supported for writing.
+  details: |
+    Write types always come from the device's model, never from how the value was typed. When the
+    model does not pin the type down, or the type is one the tool cannot encode, the tool refuses
+    rather than guess. Nothing was sent.
+  next_checks:
+    - "Run `describe <reference>` to see the type the device reports"
+    - "Write the individual components of a structure instead"
+  related: [data-access:type-inconsistent]
+  hint: "The attribute's type from the device model is ambiguous or unsupported, so the tool refused to guess; see `describe <reference>`"
+  certainty: fact
+
+- id: tool.write-se-needs-setgroup
+  keys: [tool:write-se-needs-setgroup]
+  title: Use setgroup for setting-group values
+  summary: Plain `write` refuses FC=SE targets; setting-group values are edited with `setgroup`.
+  details: |
+    Editing a setting group is a sequence: choose the group to edit, write the new values, then
+    confirm. `setgroup` runs that sequence so values are not left half-edited.
+  next_checks:
+    - "Use `setgroup` for this value"
+  related: [fc.se, sgcb.sgcb, sgcb.editsg, sgcb.cnfedit]
+  hint: "FC=SE values are edited through the setting group sequence; use `setgroup`"
+  certainty: fact
+
+- id: tool.write-co-needs-operate
+  keys: [tool:write-co-needs-operate]
+  title: Use operate for control structures
+  summary: Plain `write` refuses FC=CO targets such as `Oper`; controls go through `operate`.
+  details: |
+    `operate` reads the control model, runs the right sequence (select, operate, termination), adds
+    origin and check flags, shows the pre-flight information and asks for confirmation.
+  next_checks:
+    - "Use `operate` (or `select` / `cancel`) on the data object"
+  related: [fc.co, control.oper, control.ctlmodel]
+  hint: "FC=CO structures such as `Oper` are handled by `operate`/`select`/`cancel`, not `write`"
+  certainty: fact
+
+- id: tool.write-readback-mismatch
+  keys: [tool:write-readback-mismatch]
+  title: Written value not applied
+  summary: >-
+    The device accepted the write, but reading the value back shows something different.
+  details: |
+    The device said yes but did not apply the value, applied a rounded or clamped version, or
+    something changed it straight back. Some devices only apply certain values after a restart or a
+    separate confirmation step.
+  next_checks:
+    - "Read the value again after a short wait"
+    - "Check the device documentation for rounding, limits or apply-on-restart behaviour"
+  related: [check:writable-attribute-refused]
+  hint: "The device accepted the write but the read-back differs (not applied, rounded or clamped, or reset); read it again and check the device's rules"
+  certainty: fact
+
+- id: tool.status-only-control
+  keys: [tool:status-only-control]
+  title: Object is status-only
+  summary: >-
+    The object's ctlModel is status-only, so it cannot be controlled over the network. The tool did
+    not send anything.
+  next_checks:
+    - "Check the configuration (SCD) if the object should be controllable"
+  related: [ctlmodel.status-only, control.ctlmodel]
+  hint: "ctlModel is status-only: this object cannot be controlled over MMS"
+  certainty: fact
+
+- id: tool.not-probeable-direct-control
+  keys: [tool:not-probeable-direct-control]
+  title: Direct-control object not probeable
+  summary: >-
+    `authority-probe` tests authority with a select followed by a cancel. Objects with direct control
+    have no select step, so they can only be tested by operating them, which the probe never does.
+  next_checks:
+    - "If authority must be tested, use `operate` deliberately with the orCat in question"
+  related: [ctlmodel.direct-with-normal-security, ctlmodel.direct-with-enhanced-security, control.sbo]
+  hint: "Direct-control objects have no select step, so `authority-probe` cannot test them without operating"
+  certainty: fact
+
+- id: tool.rcb-no-free-instance
+  keys: [tool:rcb-no-free-instance]
+  title: No free report control block
+  summary: >-
+    Every instance of this report control block is enabled, reserved, or assigned to another client
+    in the SCD.
+  details: |
+    The tool lists every instance with its owner or reservation, so you can see who holds what. A
+    buffered block may stay reserved for a while after its client leaves (ResvTms).
+
+    The recommended rack practice is to give a test client its own RCB instance in each experiment's
+    SCD.
+  next_checks:
+    - "Look at the instance list: is one held by a client that is no longer running?"
+    - "Wait for ResvTms to expire, or stop a client you control"
+    - "Takeover needs expert mode and `--takeover`, and disrupts the other client"
+  related: [rcb.owner, rcb.resvtms, tool:rcb-owned-by-other-client, concept.rcb]
+  hint: "All instances are enabled, reserved or assigned to other clients; see the instance list, wait for ResvTms, or take over in expert mode"
+  certainty: fact
+
+- id: tool.rcb-owned-by-other-client
+  keys: [tool:rcb-owned-by-other-client]
+  title: Report control block owned by another client
+  summary: The report control block is enabled or reserved by another client.
+  details: |
+    Enabling it would take it away from that client, which then stops receiving its reports.
+  next_checks:
+    - "Use a free instance if there is one (`rcb`)"
+    - "Takeover requires expert mode, `--takeover` and typed confirmation"
+  related: [rcb.owner, tool:takeover-requires-expert]
+  hint: "Another client owns this RCB; pick a free instance with `rcb`, or take over in expert mode with `--takeover`"
+  certainty: fact
+
+- id: tool.rcb-owned-by-other-client.standard
+  keys: [tool:rcb-owned-by-other-client]
+  when: {mode: standard}
+  hint: "Another client owns this RCB; pick a free instance with `rcb` (takeover needs expert mode)"
+  certainty: fact
+
+- id: tool.rcb-owned-by-other-client.expert
+  keys: [tool:rcb-owned-by-other-client]
+  when: {mode: expert}
+  hint: "Another client owns this RCB; `--takeover` would disrupt that client, so use a free instance if one exists"
+  certainty: fact
+
+- id: tool.takeover-requires-expert
+  keys: [tool:takeover-requires-expert]
+  title: Takeover needs expert mode
+  summary: Taking over a report control block another client uses requires expert mode.
+  details: |
+    A takeover disrupts the other client, which may be a real station gateway. It needs expert mode,
+    the `--takeover` option and typed confirmation of the block's name.
+  next_checks:
+    - "Use a free instance instead, if one exists (`rcb`)"
+    - "If the takeover is intended, start with `--expert` and add `--takeover`"
+  related: [tool:rcb-owned-by-other-client, concept.tool-modes]
+  hint: "RCB takeover needs expert mode, `--takeover` and typed confirmation"
+  certainty: fact
+
+- id: tool.command-termination-timeout
+  keys: [tool:command-termination-timeout]
+  title: No command termination received
+  summary: >-
+    With enhanced security the device reports the end of execution separately. The tool waited for
+    that report and it did not arrive.
+  details: |
+    The operate itself was accepted. The result is unknown: the command may have completed, failed,
+    or still be running. Devices differ in how long execution may take.
+  next_checks:
+    - "Read `stVal` of the object to see whether it changed"
+    - "Look in the session log for a late termination report or LastApplError"
+  related: [control.commandtermination, ctlmodel.sbo-with-enhanced-security]
+  hint: "The operate was accepted but no termination report arrived; read `stVal` to see what happened before retrying"
+  certainty: fact
+
+- id: tool.command-termination-negative
+  keys: [tool:command-termination-negative]
+  title: Command ended negatively
+  summary: >-
+    The device accepted the operate, but its final report says execution failed.
+  details: |
+    The accompanying LastApplError carries the reason (AddCause), for example the equipment not
+    reaching its position in time.
+  next_checks:
+    - "Run `explain` on the AddCause shown with it"
+    - "Read `stVal` to see where the object ended up"
+  related: [control.commandtermination, control.lastapplerror, add-cause:time-limit-over]
+  hint: "The device accepted the operate but reported that execution failed; see the AddCause shown with it"
+  certainty: fact
+
+- id: tool.select-timeout-expired
+  keys: [tool:select-timeout-expired]
+  title: Selection has expired
+  summary: >-
+    More time passed since the select than the object's `sboTimeout` allows, so the selection has
+    lapsed on the device.
+  next_checks:
+    - "Select again and operate straight after (confirmation prompts count against the timeout)"
+  related: [control.sbotimeout, add-cause:object-not-selected]
+  hint: "The selection has expired (`sboTimeout`); select again and operate promptly"
+  certainty: fact
+
+- id: tool.edition-unknown
+  keys: [tool:edition-unknown]
+  title: Edition unknown, check not run
+  summary: This check depends on the device's edition, which is unknown, so it was not run.
+  details: |
+    The tool works out the edition from the inventory, the SCL, the `ldNs` namespace in
+    `LLN0.NamPlt`, or model heuristics. If none of these gives an answer, and nobody was asked (or
+    answered "don't know"), edition-dependent checks report "not run" rather than guess.
+  next_checks:
+    - "Set the edition in the inventory for this device"
+    - "Supply an SCD or CID as reference"
+    - "Run the check interactively and answer the edition question"
+  related: [concept.edition, concept.ldns]
+  hint: "The device's edition is unknown, so this edition-dependent check was not run; set it in the inventory or supply an SCL"
+  certainty: fact
+
+- id: tool.non-interactive-no-prompt
+  keys: [tool:non-interactive-no-prompt]
+  title: Cannot ask in non-interactive mode
+  summary: >-
+    The tool needed an answer from the operator (confirmation, edition, orCat) but is running
+    non-interactively, so it did not ask.
+  next_checks:
+    - "Give the answer on the command line (e.g. `--orcat`, or the edition in the inventory)"
+    - "Run the command in the interactive shell"
+  related: [tool:edition-unknown]
+  hint: "The tool needed an operator answer but is running non-interactively; pass it as an option or use the shell"
+  certainty: fact
+
+- id: tool.local-address-missing
+  keys: [tool:local-address-missing]
+  title: Local address not configured
+  summary: >-
+    The association should come from the local address {local_ip}, but no network interface on this
+    computer has that address.
+  details: |
+    Some devices only accept clients from known addresses, so the tool can send from a neighbour's
+    address (`--as <client>`). The address must first be added to a network interface on this
+    computer, for example:
+
+    - sudo ip addr add {local_ip}/{prefix} dev {interface}
+
+    Use the prefix length of the rack subnet and the interface connected to the rack. The address
+    stays until it is removed (`sudo ip addr del …`) or the computer restarts. Make sure the real
+    client is not connected at the same time, as two machines with the same address disturb each
+    other.
+  next_checks:
+    - "Add the address: sudo ip addr add {local_ip}/{prefix} dev {interface}"
+    - "Check with `ip addr` that it is there, then retry"
+  related: [concept.acting-as-client]
+  hint: "Local address {local_ip} is not on any interface; add it with `sudo ip addr add {local_ip}/{prefix} dev {interface}` and retry"
+  certainty: fact
+
+- id: tool.association-slot-occupied-by-tool
+  keys: [tool:association-slot-occupied-by-tool]
+  title: This tool uses an association slot
+  summary: >-
+    While this session is connected, the tool itself occupies one of the device's association slots.
+  details: |
+    If the device is short of slots, the tool's own association can be the one that keeps another
+    client out. Disconnect when you want to see whether the other client recovers.
+  next_checks:
+    - "`disconnect` and see whether the other client connects"
+  related: [concept.association-slots]
+  hint: "Remember that this session itself occupies one of the device's association slots"
+  certainty: fact
+
+- id: tool.slots-probably-exhausted
+  keys: [tool:slots-probably-exhausted]
+  title: Association slots probably exhausted
+  summary: >-
+    The way the device refused the association fits the pattern of a device with no free
+    association slots.
+  details: |
+    Devices serve a limited number of associations at a time and do not report how many are in use.
+    Slots can be held by other clients, by this tool, or by stale associations from clients that
+    disconnected abruptly, which the device only drops after its own timeout.
+
+    This is an inference from the refusal pattern, not a confirmed count.
+  next_checks:
+    - "Check which clients (gateway, HMI, test tools) are connected to the device"
+    - "Wait for the device's slot-release time (from the quirks file, if known) and retry"
+    - "Restarting the device frees all slots, if that is acceptable in the experiment"
+  related: [concept.association-slots, tool:association-slot-occupied-by-tool, association:acse-rejected-transient]
+  hint: "No free association slots (other clients, or stale associations from abrupt disconnects); wait for release or free one"
+  certainty: likely
+
+- id: tool.rcb-cleanup-incomplete
+  keys: [tool:rcb-cleanup-incomplete]
+  title: Report control block cleanup incomplete
+  summary: >-
+    On exit the tool could not fully restore a report control block it used, for example because a
+    reservation lingers.
+  details: |
+    A buffered block the tool enabled may stay reserved for this computer for the reservation time
+    (ResvTms) after the association closes, which keeps other clients from enabling it. The report
+    printed on exit names the block, what it affects and for how long.
+  next_checks:
+    - "Wait for the reservation time to run out, or reconnect and release it"
+    - "Run `rcb` later to confirm the block is free again"
+  related: [rcb.resvtms, rcb.rptena]
+  hint: "An RCB could not be fully restored (e.g. a lingering ResvTms reservation); see the exit report for which block and for how long"
+  certainty: fact
+
+- id: tool.security-not-supported
+  keys: [tool:security-not-supported]
+  title: Communication security not supported
+  summary: >-
+    This version of the tool does not support ACSE authentication or TLS (IEC 62351). It can only
+    detect that a device seems to require them.
+  details: |
+    A device that insists on authentication or TLS cannot be reached by this tool. The inventory
+    reserves a `security` block so that support can be added later without changing its format.
+  next_checks:
+    - "Use a client that supports the device's security settings, or relax them for the test"
+  related: [scope.security, association:tls-suspected, association:authentication-suspected]
+  hint: "ACSE authentication and TLS are not supported in this version; the tool can only detect that a device seems to require them"
+  certainty: fact
+
+- id: tool.goose-out-of-scope
+  keys: [tool:goose-out-of-scope]
+  title: GOOSE is outside what this tool can see
+  summary: >-
+    This tool is an MMS client. It cannot see GOOSE or Sampled Values traffic, including control or
+    interlocking signals exchanged between devices over GOOSE.
+  next_checks:
+    - "Use Wireshark on the station bus to see GOOSE messages"
+    - "Read GOOSE supervision on the subscriber (LGOS) over MMS, if the device has it"
+  related: [scope.goose, scope.sampled-values, ln.lgos]
+  hint: "GOOSE is not MMS and is invisible to this tool; use Wireshark, or read LGOS on the subscribing device if present"
+  certainty: fact
+
+# -----------------------------------------------------------------------------------------------------
+# Controls (raised by mms_client.core.controls)
+# -----------------------------------------------------------------------------------------------------
+- id: tool.orcat-required
+  keys: [tool:orcat-required]
+  title: No orCat chosen
+  summary: >-
+    No originator category (orCat) was chosen for this command, so nothing was sent. The tool never
+    picks one silently.
+  details: |
+    The device may accept or refuse a command depending on the level it claims to come from (bay,
+    station or remote) and its local/remote settings. A device such as a station gateway can
+    legitimately send several categories, so the choice belongs to each command, not to a device.
+    Choose the one the real client would use for the command you are reproducing.
+  next_checks:
+    - "Pass `--orcat 1|2|3` (bay/station/remote) on the command line"
+    - "In the shell, run `set orcat bay|station|remote` once for the session"
+  related: [control.orcat, concept.switching-hierarchy]
+  hint: "No orCat was chosen (the tool never picks one); pass `--orcat 1|2|3` (bay/station/remote) or `set orcat …` in the shell"
+  certainty: fact
+
+- id: tool.invalid-orcat
+  keys: [tool:invalid-orcat]
+  title: orCat not valid
+  summary: >-
+    The orCat given is not one of the defined values (0 to 8, or the names bay, station, remote,
+    auto-bay, auto-station, auto-remote, maintenance, process, not-supported).
+  details: |
+    Standard mode offers 1 (bay), 2 (station) and 3 (remote); the others need expert mode.
+  next_checks:
+    - "Use 1, 2 or 3 (or bay, station, remote)"
+  related: [control.orcat, orcat.bay-control, orcat.station-control, orcat.remote-control]
+  hint: "orCat must be 0-8 or a name such as bay, station or remote (1-3 in standard mode)"
+  certainty: fact
+
+- id: tool.cdc-not-supported
+  keys: [tool:cdc-not-supported]
+  title: Control class not supported in v1
+  summary: >-
+    This version of the tool operates SPC, DPC and INC objects only. Other controllable classes
+    (APC setpoints, BSC and ISC step positions such as tap changers, ENC) are planned for later.
+  details: |
+    Nothing was sent. The class shown was taken from the model or inferred from the control value's
+    type.
+  next_checks:
+    - "Run `describe <object>` to confirm the class"
+    - "Use the vendor's tool for controls of this class for now"
+  related: [cdc.spc, cdc.dpc, cdc.inc, cdc.apc, cdc.bsc, cdc.isc]
+  hint: "This version only operates SPC, DPC and INC objects; APC, BSC, ISC and similar controls come later (nothing was sent)"
+  certainty: fact
+
+- id: tool.control-refused
+  keys: [tool:control-refused]
+  title: Control refused without a reason
+  summary: >-
+    The device refused a control step but gave neither an error code nor an AddCause.
+  details: |
+    Without a reason, work through the usual suspects: control authority (`Loc`, `LocSta`, orCat),
+    mode (`Mod`/`Beh`), health, interlocking, and a selection held by another client.
+  next_checks:
+    - "Read `Loc`, `LocSta` and `LocKey`, then run `authority-probe <object>`"
+    - "Read `Beh` and `Health` of the logical node and of LLN0"
+    - "Look for a LastApplError in the session log"
+  related: [add-cause:unknown, concept.switching-hierarchy, control.lastapplerror]
+  hint: "`Loc`/`LocSta`, `Beh`, `Health` and interlocking, and run `authority-probe`; the device refused without a reason"
+  certainty: check
+
+# -----------------------------------------------------------------------------------------------------
+# Reports (raised by mms_client.core.reports)
+# -----------------------------------------------------------------------------------------------------
+- id: tool.rcb-not-found
+  keys: [tool:rcb-not-found]
+  title: No such report control block
+  summary: No report control block on the device matches the name given.
+  details: |
+    Instance names differ between devices (for example numbered suffixes), and buffered and
+    unbuffered blocks live under different FCs (BR and RP).
+  next_checks:
+    - "Run `rcb` and copy the name from its list"
+  related: [concept.rcb, check:client-rcb-missing]
+  hint: "No report control block matches that name; run `rcb` and copy the name from its list"
+  certainty: fact
+
+- id: tool.invalid-trgops
+  keys: [tool:invalid-trgops]
+  title: Unknown trigger option
+  summary: The trigger options given contain a name the tool does not know.
+  details: |
+    The trigger options are dchg (data change), qchg (quality change), dupd (data update), period
+    (integrity period) and gi (general interrogation).
+  next_checks:
+    - "Use a combination of dchg, qchg, dupd, period and gi"
+  related: [rcb.trgops]
+  hint: "Trigger options are dchg, qchg, dupd, period and gi"
+  certainty: fact
+
+# -----------------------------------------------------------------------------------------------------
+# Setting groups (raised by mms_client.core.setgroup)
+# -----------------------------------------------------------------------------------------------------
+- id: tool.no-setting-groups
+  keys: [tool:no-setting-groups]
+  title: No setting groups here
+  summary: >-
+    The device (or the logical device named) has no setting group control block, so it has no
+    setting groups to switch or edit.
+  details: |
+    Settings outside setting groups have FC=SP and are changed with `write`.
+  next_checks:
+    - "Run `describe <reference>` to see the setting's FC"
+    - "If another logical device has the settings, name it"
+  related: [sgcb.sgcb, fc.sp]
+  hint: "There is no setting group control block here; settings outside groups (FC=SP) are changed with `write`"
+  certainty: fact
+
+- id: tool.ambiguous-sgcb
+  keys: [tool:ambiguous-sgcb]
+  title: Which setting group control block?
+  summary: >-
+    Several logical devices have their own setting groups, and the command did not say which one to
+    use, or one edit mixed settings from different logical devices.
+  details: |
+    Each logical device switches and edits its setting groups on its own, so one edit covers one
+    logical device.
+  next_checks:
+    - "Name the logical device, and edit one logical device at a time"
+  related: [sgcb.sgcb, concept.logical-device]
+  hint: "Several logical devices have setting groups; name the logical device and edit one at a time"
+  certainty: fact
+
+- id: tool.invalid-setting-group
+  keys: [tool:invalid-setting-group]
+  title: Setting group number out of range
+  summary: Setting groups are numbered from 1 up to the device's `NumOfSG`.
+  next_checks:
+    - "Read `NumOfSG` in the logical device's SGCB"
+  related: [sgcb.numofsg, sgcb.actsg]
+  hint: "Setting groups are numbered 1 to `NumOfSG`; read `NumOfSG` in the SGCB"
+  certainty: fact
+
+- id: tool.sgcb-attribute-missing
+  keys: [tool:sgcb-attribute-missing]
+  title: Setting group control block incomplete
+  summary: >-
+    The device's setting group control block lacks an attribute this step needs (for example
+    `EditSG` or `CnfEdit` on a device that only allows switching groups).
+  details: |
+    Some devices let clients switch the active group but not edit groups over MMS.
+  next_checks:
+    - "`ls` the SGCB to see which attributes the device offers"
+    - "Record it as a device quirk"
+  related: [sgcb.sgcb, sgcb.editsg, sgcb.cnfedit]
+  hint: "which attributes the SGCB offers (`ls` it); it lacks one this step needs, as on devices that only allow switching groups"
+  certainty: check
+
+- id: tool.not-a-setting
+  keys: [tool:not-a-setting]
+  title: Not an editable setting-group value
+  summary: >-
+    The reference has no FC=SE attribute, so it is not a setting-group value that `setgroup` can
+    edit.
+  details: |
+    Settings outside setting groups have FC=SP and are changed with `write`. Status and measured
+    values cannot be set at all.
+  next_checks:
+    - "Run `describe <reference>` to see its FC"
+  related: [fc.se, fc.sp, sgcb.sgcb]
+  hint: "This reference has no FC=SE value, so `setgroup` cannot edit it; see its FC with `describe` (SP settings use `write`)"
+  certainty: fact
+
+- id: tool.nothing-to-edit
+  keys: [tool:nothing-to-edit]
+  title: Nothing to edit
+  summary: The setting-group edit was given no values to change.
+  next_checks:
+    - "Give at least one `<reference> <value>` pair"
+  related: [sgcb.sgcb]
+  hint: "Give `setgroup` at least one `<reference> <value>` pair"
+  certainty: fact
+
+- id: tool.write-readback-mismatch.setgroup
+  keys: [tool:write-readback-mismatch]
+  when: {service: setgroup}
+  hint: "The device confirmed the edit but a value reads back differently (not stored, rounded or clamped); read the group again and check the device's limits"
+  certainty: fact
+
+# -----------------------------------------------------------------------------------------------------
+# Inventory and session (raised by mms_client.core.session / restore)
+# -----------------------------------------------------------------------------------------------------
+- id: tool.inventory-required
+  keys: [tool:inventory-required]
+  title: Inventory needed
+  summary: >-
+    `--as <client>` takes the client's source IP and report control blocks from the experiment
+    inventory, so an inventory file is needed.
+  next_checks:
+    - "Pass `--inventory <file>` (e.g. `experiments/<name>.yaml`)"
+    - "Create one with `inventory from-scd` or `discover` if the experiment has none yet"
+  related: [concept.acting-as-client]
+  hint: "`--as <client>` needs an inventory; pass `--inventory <file>`"
+  certainty: fact
+
+- id: tool.unknown-client
+  keys: [tool:unknown-client]
+  title: Client not in the inventory
+  summary: >-
+    The inventory has no client relationship with that name for this device.
+  details: |
+    A client relationship names the client, the device it talks to, its source IP and the report
+    control blocks it uses.
+  next_checks:
+    - "Check the spelling against the inventory's clients"
+    - "Run `inventory validate` to check the file"
+  related: [concept.acting-as-client]
+  hint: "The inventory has no client of that name for this device; check the spelling and the inventory's client list"
+  certainty: fact
+
+- id: tool.restore-device-mismatch
+  keys: [tool:restore-device-mismatch]
+  title: Log belongs to another device
+  summary: >-
+    The session log given to `restore` records writes to a different device, so its values are not
+    put back on this one.
+  next_checks:
+    - "Connect to the device named in the log, or pick the log of this device's session"
+  related: [tool:write-readback-mismatch]
+  hint: "That session log belongs to another device; restore only puts values back on the device they were written to"
+  certainty: fact
+
+- id: tool.control-refused.select
+  keys: [tool:control-refused]
+  when: {service: select}
+  hint: "`Loc`/`LocSta`, `stSeld` and `Beh`, and run `authority-probe`; the device refused the select without a reason (normal-security selects only return an empty answer)"
+  certainty: check
+
+# -----------------------------------------------------------------------------------------------------
+# Diagnosis (raised by mms_client.diagnosis)
+# -----------------------------------------------------------------------------------------------------
+- id: tool.known-association-limit
+  keys: [tool:known-association-limit]
+  title: Known association limit (quirks file)
+  summary: >-
+    The quirks file records how many associations this device model accepts, how it refuses extra
+    clients, and how long it takes to release a slot after a client disconnects abruptly.
+  details: |
+    The protocol offers no way to ask a device for these numbers, so they come from earlier
+    measurements on the same model and firmware, recorded with their source. Compare the limit with
+    the clients that should be connected (gateway, HMI, test tools, and this tool itself).
+  next_checks:
+    - "Count the clients that should be connected to this device, including this tool"
+    - "After an abrupt disconnect, wait at least the recorded release time before retrying"
+  related: [concept.association-slots, tool:slots-probably-exhausted, tool:association-slot-occupied-by-tool]
+  hint: "the association limit and slot-release time recorded for this model (shown by `diagnose`) against the clients that should be connected"
+  certainty: check

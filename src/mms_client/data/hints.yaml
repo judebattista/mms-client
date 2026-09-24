@@ -1,0 +1,1153 @@
+# =====================================================================================================
+# mms-client hint and explanation catalogue (SPEC §13, EXP-1 … EXP-7)
+# =====================================================================================================
+#
+# The built-in catalogue is made of these files, loaded in this order:
+#   1. data/hints.yaml          (this file: format description + protocol error codes)
+#   2. data/hints/*.yaml        (in file-name order: association, checks, control, tool)
+#   3. data/glossary.yaml       (concepts: modelling basics, quality, editions, MMS/ACSE, scope, tool)
+#   4. data/glossary/*.yaml     (in file-name order: cdcs, controls, fcs, ln-classes, reports)
+# Extra files (e.g. one per experiment) can be layered on top with
+#   Catalogue.load(extra_paths=["experiments/my-rack-hints.yaml"])
+# An entry in a later file with the same `id` REPLACES the earlier entry completely.
+# Everything here is plain data: edit it without touching code. Invalid files are rejected on load
+# with a message naming the file and the entry.
+#
+# -----------------------------------------------------------------------------------------------------
+# FILE FORMAT (JSON-schema-like)
+# -----------------------------------------------------------------------------------------------------
+#
+# File = {
+#   "version": 1,                        # required; integer; the format version
+#   "entries": [Entry, ...]              # required; list
+# }
+#
+# Entry = {
+#   "id":          string,       # REQUIRED. lower case, characters [a-z0-9._+-]; unique within a file.
+#                                #   `explain <id>` shows the entry. Conventions:
+#                                #     "<domain>.<name>"             error codes, e.g. "add-cause.step-limit"
+#                                #     "<domain>.<name>.<situation>" context variants
+#                                #     "ln.xcbr", "cdc.dpc", "fc.st", "control.sbo", "rcb.resvtms", …
+#   "keys":        [string],     # error keys "<domain>:<name>" as defined in mms_client/codes.py, e.g.
+#                                #   "data-access:object-access-denied", "ied:access-denied",
+#                                #   "add-cause:blocked-by-interlocking", "association:tcp-refused",
+#                                #   "acse-diag:authentication-required", "tool:local-address-missing",
+#                                #   "check:locsta-missing". Write names, not numbers.
+#                                #   "<domain>:*" = fallback for codes of that domain without an entry.
+#                                #   One entry may list several keys (e.g. the same error as reported by
+#                                #   the IED layer, the data-access layer and the MMS layer).
+#   "terms":       [string],     # words `explain <term>` accepts, e.g. ["XCBR", "circuit breaker"].
+#                                #   Matching ignores case, spaces, dots, hyphens and underscores.
+#                                #   A term may belong to one entry only (within the built-in files).
+#   "kind":        "error" | "term" | "concept",   # default: "error" if keys are given, else "term"
+#   "title":       string,       # one line. REQUIRED, except on context variants (inherited).
+#   "summary":     string,       # one or two sentences. REQUIRED, except on context variants.
+#   "details":     string,       # longer text. Blank lines separate paragraphs; lines that start
+#                                #   with "- " are list items. Other line breaks are ignored.
+#   "next_checks": [string],     # concrete next steps, most useful first.
+#   "related":     [string],     # ids, error keys or terms: anything `explain` accepts.
+#   "hint":        string,       # ONE line, without a certainty prefix. REQUIRED when keys are given,
+#                                #   not allowed otherwise.
+#   "certainty":   "fact" | "likely" | "check",   # REQUIRED when keys are given.
+#                                #   fact   : the tool has PROVED it (e.g. the model says FC=ST, so the
+#                                #            attribute is read-only by design). Shown as is.
+#                                #            Never use it for a guess.
+#                                #   likely : shown as "Likely cause: <hint>"
+#                                #   check  : shown as "Check: <hint>"
+#   "when":        Context,      # turns the entry into a CONTEXT VARIANT of its keys: it applies only
+#                                #   when every listed field matches. Fields a variant leaves out
+#                                #   (title, summary, details, next_checks, related) are taken from
+#                                #   the context-free entry of the same key.
+#   "priority":    integer       # default 0. Compared before specificity. Use sparingly, e.g. in an
+#                                #   experiment file that must win over everything built in.
+# }
+#
+# Context = {        # each value: a string, or a list of strings meaning "any of"; "*" = any value
+#   "service":   "associate" | "identify" | "browse" | "read" | "write" | "watch" | "setgroup" |
+#                "select" | "operate" | "cancel" | "command-termination" | "get-rcb" | "set-rcb" |
+#                "subscribe" | "gi" | "file-dir" | "file-get" | "dataset",
+#   "fc":        one of ST MX SP SV CF DC SG SE SR OR BL EX CO US MS RP BR LG GO,
+#   "cdc":       e.g. "DPC", "SPC", "INC",
+#   "ln_class":  e.g. "XCBR", "CSWI",
+#   "mode":      "standard" | "expert",
+#   "edition":   "Ed1" | "Ed2" | "Ed2.1" | "unknown",
+#   "ctl_model": "status-only" | "direct-with-normal-security" | "sbo-with-normal-security" |
+#                "direct-with-enhanced-security" | "sbo-with-enhanced-security",
+#   "tags":      {name: value, ...}   # free-form facts from the caller. QUOTE "yes"/"no"/"on"/"off",
+#                                     # YAML would turn them into booleans. Tags used in this catalogue:
+#                  bound_ip:  "yes" | "no"   the association was bound to a chosen local IP (--as)
+#                  pattern:   "refused-after-abrupt-disconnect"   (DIA-4b refusal pattern)
+#                  test:      "yes" | "no"   the control command carried the Test flag
+#                  or_cat:    "bay-control" | "station-control" | "remote-control" | …
+#                  local_ip / interface / prefix   (only substituted into text, see PLACEHOLDERS)
+# }
+#
+# MATCHING: which entry gives the hint for an error in a context
+#   1. Candidates are the entries listing the error key, plus "<domain>:*" fallbacks.
+#   2. A candidate applies when every `when` condition holds. A condition on a field the tool did
+#      not supply never holds (unknown context never produces a fact).
+#   3. The applicable candidate with the highest rank wins. Rank compares, in order:
+#        a. priority (higher wins)
+#        b. an exact key beats a "<domain>:*" fallback
+#        c. specificity = number of `when` conditions (each tag counts as one)
+#        d. position: the LATER entry wins (later file, or further down the same file)
+#   Catalogue.lint() lists pairs of entries that could tie on a-c, so (d) is never relied on by
+#   accident. The built-in catalogue is kept lint-free by a unit test.
+#
+# PLACEHOLDERS: "{name}" anywhere in the text is replaced with the context field or tag of that name,
+# or shown as "<name>" when the caller did not supply it.
+#
+# WRITING RULES
+#   - Plain language for a technician who knows substations but not the standard's internals.
+#   - Own wording only: do not copy or closely paraphrase IEC 61850 text (EXP-6).
+#   - Hints are one line. Name what to do in this tool: `read`, `rcb`, `diagnose`, `authority-probe`…
+#   - Be honest about certainty (EXP-4). Vendors differ; say "often", "on many devices".
+#   - Quote strings that contain ": " or start with a backquote, "{", "[", "*", "&", "!", "%" or "@".
+# =====================================================================================================
+
+version: 1
+entries:
+
+# -----------------------------------------------------------------------------------------------------
+# Success codes
+# -----------------------------------------------------------------------------------------------------
+- id: ied.ok
+  keys: [ied:ok, mms:none, ctl-error:no-error]
+  title: No error
+  summary: The request completed without an error.
+  hint: "No error"
+  certainty: fact
+
+# -----------------------------------------------------------------------------------------------------
+# Fallbacks for numbers this catalogue does not know (codes.info() names them "unknown-<n>")
+# -----------------------------------------------------------------------------------------------------
+- id: code.unlisted
+  keys: ["ied:*", "mms:*", "data-access:*", "add-cause:*", "ctl-error:*", "acse-diag:*"]
+  title: Code not described in the catalogue
+  summary: >-
+    The device or the protocol library returned a code that this catalogue has no entry for.
+  details: |
+    The raw number is always shown next to the name, and the session log keeps the full response.
+    Numbers outside the known tables usually come from a vendor extension or a newer library
+    version.
+
+    If you work out what the code means on this device, add an entry to an experiment catalogue
+    file (see the format description at the top of hints.yaml) so the next person gets a hint.
+  next_checks:
+    - "Look up the number in the device manual or the vendor's protocol implementation conformance statement (PICS)"
+    - "Save an incident file with `export --incident` so the case is recorded"
+  related: [ied:unknown, data-access:unknown]
+  hint: "the device documentation for this code, and add a catalogue entry once its meaning is known"
+  certainty: check
+
+# -----------------------------------------------------------------------------------------------------
+# Connection state (IED / MMS layer)
+# -----------------------------------------------------------------------------------------------------
+- id: ied.not-connected
+  keys: [ied:not-connected]
+  title: Not connected
+  summary: >-
+    The request was not sent because this session has no open association with the device.
+  details: |
+    The association was either never opened or has already been lost (the device closed it, the
+    network dropped, or the device restarted). Nothing reached the device.
+
+    The shell keeps one association open for the whole session on purpose: opening and closing
+    associations repeatedly uses up the device's limited association slots.
+  next_checks:
+    - "Run `connect` to open the association again"
+    - "If it keeps dropping, run `diagnose <device>` to find the failing layer"
+  related: [ied:connection-lost, concept.association, concept.association-slots]
+  hint: "No association is open; run `connect` first (and `diagnose <device>` if it keeps dropping)"
+  certainty: fact
+
+- id: ied.already-connected
+  keys: [ied:already-connected]
+  title: Already connected
+  summary: A new association was requested while this session already has one open.
+  details: |
+    The existing association is still usable. Opening a second one from the same session is refused
+    by the protocol library, which also avoids taking a second association slot on the device.
+  next_checks:
+    - "Carry on with the existing association, or run `disconnect` and then `connect` for a fresh one"
+  related: [concept.association]
+  hint: "This session already has an open association; carry on, or `disconnect` before connecting again"
+  certainty: fact
+
+- id: ied.connection-lost
+  keys: [ied:connection-lost, mms:connection-lost]
+  title: Connection lost
+  summary: The association broke while it was in use.
+  details: |
+    Typical reasons, roughly in order of how often they happen on a test rack:
+    - the device restarted (for example after a configuration download or a settings change)
+    - the device closed an idle association, or closed it to make room for another client
+    - the network path failed (cable, switch port, VLAN change)
+    - the device hit an internal problem while serving the request
+
+    If this tool was killed rather than disconnecting cleanly, the device may keep the old
+    association (and its slot) until its own timeout expires.
+  next_checks:
+    - "Run `connect` again; if that fails, run `diagnose <device>`"
+    - "Check the device's front panel or event list for a restart"
+    - "If other clients also lose their associations, suspect the network rather than the device"
+  related: [concept.association-slots, ied:connection-rejected, tool:slots-probably-exhausted]
+  hint: "A device restart, idle timeout or link problem dropped the association; `connect` again and run `diagnose <device>` if it repeats"
+  certainty: likely
+
+- id: ied.connection-rejected
+  keys: [ied:connection-rejected, mms:connection-rejected]
+  title: Association rejected
+  summary: >-
+    The device refused the association. The protocol library does not say at which layer, so the
+    tool's own probes are needed to narrow it down.
+  details: |
+    An association passes through several layers: TCP port 102, the ISO transport (COTP), session and
+    presentation layers, the ACSE association and finally the MMS initiate. A refusal at any of them
+    shows up here as the same generic error. `diagnose` probes the layers one by one and names the
+    one that failed.
+
+    Common causes on a test rack:
+    - all association slots are in use (other clients, or stale associations left by a client that
+      disconnected abruptly)
+    - the device only accepts clients from known source IP addresses
+    - the device expects particular addressing values (selectors, AP title) or authentication
+  next_checks:
+    - "Run `diagnose <device>` to find the refusing layer"
+    - "Try acting as a known client with `--as <client>` (binds that client's source IP)"
+    - "Count the clients connected to the device; the tool itself also uses a slot"
+  related: [concept.association-slots, concept.iso-stack, tool:slots-probably-exhausted, tool:security-not-supported]
+  hint: "which layer refused, with `diagnose <device>`; full association slots and source-IP filtering are the usual causes"
+  certainty: check
+
+- id: ied.outstanding-call-limit
+  keys: [ied:outstanding-call-limit-reached, mms:outstanding-call-limit]
+  title: Too many requests in flight
+  summary: >-
+    More requests were waiting for an answer than the device agreed to handle at the same time.
+  details: |
+    During the MMS initiate, client and device agree how many requests may be outstanding at once.
+    Some devices allow only one or two. The limit was reached before the request could be sent.
+  next_checks:
+    - "Retry; if it repeats, use a longer `watch` interval or fewer parallel operations"
+    - "Look at the negotiated values in `info`"
+  related: [concept.mms-initiate]
+  hint: "More requests were in flight than the device accepts at once; retry more slowly (longer `watch` interval, fewer parallel operations)"
+  certainty: likely
+
+- id: ied.user-provided-invalid-argument
+  keys: [ied:user-provided-invalid-argument, mms:invalid-arguments]
+  title: Invalid argument
+  summary: >-
+    The protocol library rejected the request before sending it, because an argument was not
+    acceptable (for example an empty or malformed reference, or a value of the wrong form).
+  details: |
+    Nothing reached the device. The problem is in the request as built on this side, usually the
+    object reference, the FC, or the value typed.
+  next_checks:
+    - "Check the object reference and FC; use tab completion or `ls` to pick them"
+    - "Run `describe <reference>` to see the expected type"
+  related: [concept.object-reference, ied:object-reference-invalid]
+  hint: "the object reference, FC and value (`describe <reference>`); the request was rejected locally before sending"
+  certainty: check
+
+- id: ied.object-reference-invalid
+  keys: [ied:object-reference-invalid]
+  title: Object reference not valid
+  summary: The object reference is not in a form the protocol library can use.
+  details: |
+    References have the form `LogicalDevice/LogicalNode.DataObject.Attribute`, for example
+    `CTRL/CSWI1.Pos.stVal`. The logical device part is the IED name followed by the LD instance.
+    Nothing was sent to the device.
+  next_checks:
+    - "Use `ls`, `cd` and tab completion to build the reference from the browsed model"
+  related: [concept.object-reference]
+  hint: "the reference format LD/LN.DO.DA (e.g. `CTRL/CSWI1.Pos.stVal`), or build it with tab completion"
+  certainty: check
+
+- id: ied.enable-report-failed-dataset-mismatch
+  keys: [ied:enable-report-failed-dataset-mismatch]
+  title: Report enable failed, dataset differs
+  summary: >-
+    Enabling reports failed because the report control block's dataset is not the one the tool
+    expected.
+  details: |
+    The tool checks that the block still reports the dataset it was configured for before relying on
+    it. A difference means the block was reconfigured on the device, or the expectation (inventory,
+    SCD) is out of date. ConfRev will normally differ as well.
+  next_checks:
+    - "Run `rcb` to see the block's DatSet and ConfRev"
+    - "Compare with the SCD with `check`"
+  related: [rcb.datset, rcb.confrev, check:confrev-mismatch]
+  hint: "The RCB was reconfigured on the device, or the expected dataset (SCD) is out of date; compare `rcb` with the reference"
+  certainty: likely
+
+- id: ied.unexpected-value-received
+  keys: [ied:unexpected-value-received]
+  title: Unexpected value received
+  summary: >-
+    The device answered, but with a value of a different type or shape than expected.
+  details: |
+    The tool expects values to match the model the device announced while browsing. A mismatch
+    means the device's answers and its own model description disagree, or the model changed since
+    it was browsed (for example after a configuration download).
+  next_checks:
+    - "Refresh the model with `ls --refresh` and try again"
+    - "Compare `describe <reference>` with the raw response in the session log"
+    - "If it persists, record it as a device quirk"
+  related: [ied:malformed-message]
+  hint: "`describe <reference>` after `ls --refresh`; the device's answer does not match its announced model"
+  certainty: check
+
+- id: ied.malformed-message
+  keys: [ied:malformed-message, mms:parsing-response]
+  title: Answer could not be decoded
+  summary: The device sent an answer the protocol library could not decode.
+  details: |
+    This points to an encoding difference between the device and the library, a message truncated
+    in transit, or a device-specific extension. It is rarely something the operator did.
+  next_checks:
+    - "Repeat the request once to rule out a transient problem"
+    - "Capture the exchange with Wireshark (it decodes MMS) and keep it with an incident file"
+  related: [scope.passive-capture]
+  hint: "An encoding difference or device quirk (the answer could not be decoded); repeat once, then capture it with Wireshark"
+  certainty: likely
+
+- id: ied.service-not-supported
+  keys: [ied:service-not-supported, mms:reject-unrecognized-service]
+  title: Service not supported by the device
+  summary: The device does not offer the requested service.
+  details: |
+    At association time the device lists the MMS services it supports. Devices commonly leave out
+    file services, some dataset services, or particular control variants. A device that does not
+    recognise the request at all rejects it as an unrecognised service.
+  next_checks:
+    - "Look at the supported services reported in `info`"
+    - "Check the device's conformance statement (PICS) for the service"
+  related: [concept.mms-initiate, concept.file-services]
+  hint: "the supported-services list in `info` and the device's conformance statement; the device does not offer this service"
+  certainty: check
+
+- id: ied.service-not-implemented
+  keys: [ied:service-not-implemented]
+  title: Service not implemented in the protocol library
+  summary: >-
+    The protocol library used by this tool does not implement this request, so nothing was sent.
+  details: |
+    This is a limitation on the tool's side, not a device problem.
+  next_checks:
+    - "Report it to the tool maintainers with the command you ran"
+  related: [ied:service-not-supported]
+  hint: "The tool's protocol library does not implement this request, so nothing was sent; please report it to the tool maintainers"
+  certainty: fact
+
+- id: ied.timeout
+  keys: [ied:timeout, mms:service-timeout]
+  title: No answer in time
+  summary: The device did not answer within the tool's timeout.
+  details: |
+    The device may be busy, restarting, or slow to answer large requests. Some devices also go
+    quiet instead of refusing when they are out of resources. A timeout does not prove the request
+    was ignored: the device may still have acted on it.
+  next_checks:
+    - "Retry once; if the device stays silent, run `diagnose <device>`"
+    - "Ask for less at once (one attribute rather than a whole logical node)"
+  related: [ied:connection-lost, concept.pdu-size]
+  hint: "whether the device is restarting or overloaded, then retry with a smaller request; it did not answer in time"
+  certainty: check
+
+- id: ied.timeout.associate
+  keys: [ied:timeout, mms:service-timeout]
+  when: {service: associate}
+  hint: "which layer stays silent, with `diagnose <device>` (firewall, wrong address, busy or full device)"
+  certainty: check
+
+- id: ied.timeout.browse
+  keys: [ied:timeout, mms:service-timeout]
+  when: {service: [browse, dataset]}
+  hint: "A large model that takes longer to browse than the timeout; retry, or browse one logical device at a time"
+  certainty: likely
+
+- id: ied.timeout.control
+  keys: [ied:timeout, mms:service-timeout]
+  when: {service: [select, operate, cancel]}
+  summary: >-
+    The device did not confirm the control request in time. The command may or may not have been
+    executed.
+  next_checks:
+    - "Read the object's `stVal` and the last command's `origin`/`ctlNum` before trying again"
+    - "Look for a LastApplError or CommandTermination in the session log"
+    - "Run `diagnose <device>` if the device stops answering altogether"
+  hint: "`stVal` (and `origin`/`ctlNum`) before retrying: the command may have been executed even though no confirmation arrived"
+  certainty: check
+
+- id: ied.timeout.file
+  keys: [ied:timeout, mms:service-timeout]
+  when: {service: [file-dir, file-get]}
+  hint: "A slow file transfer on the device side; retry, and download one file at a time"
+  certainty: likely
+
+# -----------------------------------------------------------------------------------------------------
+# Access results: the same error as seen by the IED layer, the data-access result and the MMS layer
+# -----------------------------------------------------------------------------------------------------
+- id: data-access.object-access-denied
+  keys: &access-denied [data-access:object-access-denied, ied:access-denied, mms:access-object-access-denied]
+  title: Access denied
+  summary: The device understood the request but refused to let this client do it.
+  details: |
+    What the refusal means depends on what was attempted:
+    - Writing a status (ST) or measured (MX) value: these are maintained by the device and are
+      read-only by design, so the refusal is expected.
+    - Writing a normally writable value (SP, CF, DC, …): the device's own rules refused it: access
+      rights for this client, a filter on the client's source IP address, a settings lock or local
+      mode on the device, or a device model that marks the attribute read-only.
+    - A control (select/operate): usually the command's originator category (orCat) is not allowed
+      by the local/remote settings, or this client lacks control authority.
+    - A report control block: usually another client owns or has reserved it.
+
+    Some devices count refused requests in a security logical node (GSAL), which can confirm that an
+    access rule was involved.
+  next_checks:
+    - "Run `describe <reference>` to see the FC and whether the model marks it writable"
+    - "Try again as the real client with `--as <client>` (source IP and identity)"
+    - "Read `Loc`, `LocSta` and `Mod` on the logical node or LLN0"
+    - "If the device has a GSAL logical node, read its counters before and after"
+  related: [fc.st, fc.sp, ln.gsal, concept.switching-hierarchy, rcb.owner]
+  hint: "the FC (`describe`), the device's access rules for this client and source-IP filtering (`--as <client>`)"
+  certainty: check
+
+- id: data-access.object-access-denied.write-status
+  keys: *access-denied
+  when: {service: write, fc: [ST, MX]}
+  title: "Access denied: status and measured values are read-only"
+  summary: >-
+    The model says this attribute has FC={fc}. Values with this FC are produced by the device
+    itself, so no client can write them; the refusal is the expected answer.
+  details: |
+    Status (ST) and measured (MX) values reflect the device's view of the process. To change what
+    they show, operate the controllable object (for example `operate` on `CSWI1.Pos`), write the
+    setting that drives them, or use substitution (FC=SV) where the device supports it.
+
+    In expert mode such writes are allowed for negative testing; this refusal is then the result
+    you were testing for.
+  next_checks:
+    - "Use `operate` for controllable objects, or the setting (SP/SG) behind the value"
+    - "For test values, see whether the object supports substitution (`subEna`/`subVal`, FC=SV)"
+  related: [fc.st, fc.mx, fc.sv, tool:refused-standard-mode]
+  hint: "FC={fc} values are maintained by the device and are read-only by design; this refusal is expected"
+  certainty: fact
+
+- id: data-access.object-access-denied.write-setting-group
+  keys: *access-denied
+  when: {service: write, fc: [SG, SE]}
+  title: "Access denied: setting-group values need the setting group sequence"
+  summary: >-
+    The model says this attribute has FC={fc}. Setting-group values cannot be written directly; they
+    are changed through the setting group control block (select group for editing, write, confirm).
+  next_checks:
+    - "Use `setgroup` to edit the value"
+  related: [fc.sg, fc.se, sgcb.sgcb, tool:write-se-needs-setgroup]
+  hint: "FC={fc} values are changed through the setting group control block, not by a plain write; use `setgroup`"
+  certainty: fact
+
+- id: data-access.object-access-denied.write-control
+  keys: *access-denied
+  when: {service: write, fc: CO}
+  title: "Access denied: control structures are operated, not written"
+  summary: >-
+    The model says this attribute has FC=CO. Control structures are changed through the control
+    services (select, operate, cancel), which add the checks and sequence the device expects.
+  next_checks:
+    - "Use `operate`, `select` or `cancel` instead"
+  related: [fc.co, tool:write-co-needs-operate, control.oper]
+  hint: "FC=CO structures are handled by the control services; use `operate`/`select`/`cancel` instead of `write`"
+  certainty: fact
+
+- id: data-access.object-access-denied.write-writable-fc
+  keys: *access-denied
+  when: {service: write, fc: [SP, SV, CF, DC, EX, BL]}
+  title: "Access denied on a normally writable value"
+  summary: >-
+    FC={fc} values are normally writable, so the refusal comes from this device's own rules rather
+    than from the kind of value.
+  details: |
+    Things that make devices refuse writes to settings and configuration:
+    - access rights per client: some devices only accept writes from configured clients, recognised
+      by source IP address or by association parameters
+    - a settings lock, password or "local only" setting on the device
+    - the device's model marks this particular attribute as read-only (common for CF values such as
+      `ctlModel`)
+    - the logical node is in a mode that blocks changes
+  next_checks:
+    - "Try again as the client that normally writes it: `--as <client>`"
+    - "Check the device's settings-protection options (front panel or vendor tool)"
+    - "Run `describe <reference>` to see whether the model marks the attribute writable"
+  related: [check:writable-attribute-refused, concept.acting-as-client, ln.gsal]
+  hint: "access rights for this client, source-IP filtering (`--as <client>`) and settings locks: FC={fc} is normally writable, so the device's own rules refused it"
+  certainty: check
+
+- id: data-access.object-access-denied.control
+  keys: *access-denied
+  when: {service: [select, operate, cancel]}
+  title: "Access denied on a control"
+  summary: >-
+    The device refused the command from this client. For controls this usually means the command's
+    origin is not allowed to control the object at the moment.
+  details: |
+    Control authority depends on the originator category (orCat) sent with the command and on the
+    local/remote settings (`Loc`, `LocSta`, sometimes `LocKey`). A bay in local mode refuses station
+    and remote commands; station-level authority may refuse remote commands, and the other way round.
+    Some devices additionally restrict which clients may control at all.
+  next_checks:
+    - "Read `Loc`, `LocSta` and `LocKey` on the control LN and on LLN0"
+    - "Run `authority-probe <object>` to see which orCat values are accepted"
+    - "Resend with the orCat the real client uses (`set orcat …` or `--orcat`)"
+  related: [concept.switching-hierarchy, control.orcat, control.loc, control.locsta]
+  hint: "The orCat or this client's authority is not accepted right now (local mode or switching hierarchy); read `Loc`/`LocSta` and run `authority-probe`"
+  certainty: likely
+
+- id: data-access.object-access-denied.read
+  keys: *access-denied
+  when: {service: [read, watch, browse, dataset]}
+  hint: "whether the device restricts reading for this client; try as a configured client with `--as <client>`"
+  certainty: check
+
+- id: data-access.object-access-denied.rcb
+  keys: *access-denied
+  when: {service: [set-rcb, subscribe, gi]}
+  title: "Access denied on a report control block"
+  summary: >-
+    The device refused a change to the report control block. Usually another client owns or has
+    reserved it, or the attribute cannot change while the block is enabled.
+  next_checks:
+    - "Run `rcb` to see RptEna, Resv/ResvTms and Owner of every instance"
+    - "Disable the block (RptEna=false) before changing its other attributes"
+  related: [rcb.owner, rcb.rptena, rcb.resvtms, tool:rcb-owned-by-other-client]
+  hint: "Another client owns or has reserved this RCB, or it is enabled and locked for changes; run `rcb` to see Owner and reservation"
+  certainty: likely
+
+- id: data-access.object-access-denied.rcb-write
+  keys: *access-denied
+  when: {service: write, fc: [BR, RP]}
+  title: "Access denied on a report control block"
+  summary: >-
+    The device refused a write to a report control block attribute. Usually another client owns or
+    has reserved it, or the attribute cannot change while the block is enabled.
+  next_checks:
+    - "Run `rcb` to see RptEna, Resv/ResvTms and Owner of every instance"
+    - "Use `subscribe` rather than writing RCB attributes by hand"
+  related: [rcb.owner, rcb.rptena, rcb.resvtms]
+  hint: "Another client owns or has reserved this RCB, or it is enabled and locked for changes; run `rcb` to see Owner and reservation"
+  certainty: likely
+
+- id: data-access.object-access-denied.setgroup
+  keys: *access-denied
+  when: {service: setgroup}
+  hint: "Another client is editing a setting group, editing is locked on the device, or this client lacks the right"
+  certainty: likely
+
+- id: data-access.object-access-denied.file
+  keys: *access-denied
+  when: {service: [file-dir, file-get]}
+  hint: "whether the device allows file access for this client; some devices protect files or need a local setting first"
+  certainty: check
+
+- id: data-access.object-non-existent
+  keys: &non-existent [data-access:object-non-existent, ied:object-does-not-exist, mms:access-object-non-existent]
+  title: Object does not exist
+  summary: The device has no object with this reference and functional constraint.
+  details: |
+    Typical reasons:
+    - a spelling or case difference in the reference (references are case-sensitive)
+    - the wrong logical device name: it is the IED name followed by the LD instance, and changes when
+      the IED is renamed in the configuration
+    - the right name with the wrong FC (the same data object has attributes under several FCs)
+    - an object that exists in the SCD but not in the device's current configuration, or only in
+      another edition (e.g. `ResvTms`, `Owner`, `LocSta` are Ed2 additions)
+  next_checks:
+    - "Browse with `ls`/`tree` and use tab completion"
+    - "Refresh the model with `ls --refresh` if the device was reconfigured"
+    - "Run `check` against the SCD to list missing objects"
+  related: [concept.object-reference, check:model-object-missing, concept.edition]
+  hint: "spelling (case-sensitive), logical device name and FC with `ls`/`tree`; the device has no such object"
+  certainty: check
+
+- id: data-access.object-non-existent.control
+  keys: *non-existent
+  when: {service: [select, operate, cancel]}
+  hint: "A control structure this sequence needs (SBO, SBOw, Oper or Cancel) is missing on the device; read `ctlModel` and `ls` the data object"
+  certainty: likely
+
+- id: data-access.object-non-existent.rcb
+  keys: *non-existent
+  when: {service: [get-rcb, set-rcb, subscribe, gi]}
+  hint: "the instance name with `rcb`; this RCB or attribute does not exist (Ed1 blocks have no ResvTms/Owner)"
+  certainty: check
+
+- id: data-access.object-non-existent.dataset
+  keys: *non-existent
+  when: {service: dataset}
+  hint: "the dataset names with `dataset` and against the SCD; the dataset or a member does not exist on the device"
+  certainty: check
+
+- id: data-access.object-non-existent.setgroup
+  keys: *non-existent
+  when: {service: setgroup}
+  hint: "`NumOfSG` in the SGCB; the logical device may have no setting groups, or fewer than requested"
+  certainty: check
+
+- id: data-access.object-undefined
+  keys: &undefined [data-access:object-undefined, ied:object-undefined, mms:definition-object-undefined]
+  title: Object not defined
+  summary: The name is not defined on the device (variable, dataset or logical device).
+  details: |
+    This is close to "object does not exist". It often appears after the device was reconfigured,
+    so that a name the tool learned while browsing is no longer defined.
+  next_checks:
+    - "Refresh the model with `ls --refresh`"
+    - "Compare the name with `ls`/`tree` output and with the SCD"
+  related: [data-access:object-non-existent, check:model-object-missing]
+  hint: "the model after `ls --refresh`, and against the SCD; the name is not defined on the device"
+  certainty: check
+
+- id: data-access.object-undefined.dataset
+  keys: *undefined
+  when: {service: [dataset, get-rcb, subscribe]}
+  hint: "the RCB's DatSet against the datasets listed by `dataset`; that dataset is not defined on the device"
+  certainty: check
+
+- id: data-access.object-access-unsupported
+  keys: &access-unsupported [data-access:object-access-unsupported, ied:object-access-unsupported, mms:access-object-access-unsupported]
+  title: This kind of access is not supported
+  summary: The object exists, but the device does not support this kind of access to it.
+  details: |
+    Examples: reading a structure the device only lets clients write (control structures), or
+    writing an attribute the device implements as read-only even though its FC would normally allow
+    writes. This is a design decision in the device, not a transient condition.
+  next_checks:
+    - "Run `describe <reference>` for the FC and the model's access information"
+    - "Check the device's documentation for which attributes are writable"
+  related: [data-access:object-access-denied, fc.co]
+  hint: "`describe <reference>` and the device documentation; the device does not support this kind of access to this object"
+  certainty: check
+
+- id: data-access.object-access-unsupported.read-control
+  keys: *access-unsupported
+  when: {service: [read, watch], fc: CO}
+  hint: "Control structures (Oper, SBOw, Cancel) are write-only on many devices; read `stVal` and `ctlModel` instead"
+  certainty: likely
+
+- id: data-access.object-access-unsupported.write
+  keys: *access-unsupported
+  when: {service: write}
+  hint: "The device implements this attribute as read-only even though its FC normally allows writes (a device design choice)"
+  certainty: likely
+
+- id: data-access.type-inconsistent
+  keys: &type-inconsistent [data-access:type-inconsistent, ied:type-inconsistent, mms:definition-type-inconsistent]
+  title: Type does not match
+  summary: The value's data type or size does not match what the device expects for this object.
+  details: |
+    The tool takes value types from the device's own model, so a mismatch usually means the
+    device's model description and what it actually accepts differ, or the model changed since it
+    was browsed. Size matters as well as type: bit strings (e.g. TrgOps, OptFlds), strings and
+    integers have fixed sizes that differ between vendors and editions.
+  next_checks:
+    - "Refresh the model with `ls --refresh` and check `describe <reference>`"
+    - "Compare the type with the SCD's data type templates"
+  related: [tool:write-type-unsupported, check:model-type-mismatch]
+  hint: "The value's type or size does not match the device's model for this object; check `describe` and refresh with `ls --refresh`"
+  certainty: likely
+
+- id: data-access.type-inconsistent.write
+  keys: *type-inconsistent
+  when: {service: [write, setgroup]}
+  hint: "The written value's type or size does not match the device's model for this attribute (e.g. bit-string or string length); check `describe` and `ls --refresh`"
+  certainty: likely
+
+- id: data-access.type-inconsistent.control
+  keys: *type-inconsistent
+  when: {service: [select, operate, cancel]}
+  hint: "The control structure sent does not match what this device expects (ctlVal type or the fields of Oper/SBOw), often an edition or vendor difference; check the edition in `info`"
+  certainty: likely
+
+- id: data-access.type-inconsistent.rcb
+  keys: *type-inconsistent
+  when: {service: [set-rcb, subscribe]}
+  hint: "An RCB attribute was written with the wrong type or size; TrgOps and OptFlds bit strings differ between editions and vendors"
+  certainty: likely
+
+- id: data-access.type-unsupported
+  keys: [data-access:type-unsupported, ied:type-unsupported, mms:definition-type-unsupported]
+  title: Type not supported
+  summary: The device does not support the data type used in this request.
+  details: |
+    Some devices cannot handle certain types in certain services, for example writing a whole
+    structure at once, or a type the device does not implement.
+  next_checks:
+    - "Write or read individual attributes instead of whole structures"
+    - "Run `describe <reference>` to see the expected type"
+  related: [data-access:type-inconsistent, tool:write-type-unsupported]
+  hint: "The device cannot handle this data type here (e.g. a whole structure at once); read or write individual attributes instead"
+  certainty: likely
+
+- id: data-access.temporarily-unavailable
+  keys: &temp-unavailable [data-access:temporarily-unavailable, ied:temporarily-unavailable, mms:access-temporarily-unavailable]
+  title: Temporarily unavailable
+  summary: >-
+    The object exists but cannot be used right now, usually because something else holds it or the
+    device is in a state that blocks it.
+  details: |
+    Report control blocks are the classic case: an RCB that another client has enabled or reserved
+    answers this way when you try to enable it. Setting groups being edited by another client, and
+    objects locked by an ongoing command, behave similarly.
+  next_checks:
+    - "Run `rcb` for report control blocks to see Owner, Resv and ResvTms"
+    - "Retry after a short wait"
+  related: [rcb.rptena, rcb.resv, rcb.resvtms, rcb.owner]
+  hint: "Another client, an edit or a running command holds this object right now; retry later and look for the holder"
+  certainty: likely
+
+- id: data-access.temporarily-unavailable.rcb
+  keys: *temp-unavailable
+  when: {service: [set-rcb, subscribe]}
+  title: "Report control block in use"
+  summary: >-
+    The RCB could not be enabled or changed because another client owns it, has reserved it, or its
+    reservation time (ResvTms) from an earlier session has not run out yet.
+  next_checks:
+    - "Run `rcb` to list instances with their Owner and reservation state"
+    - "Pick a free instance, or wait for ResvTms to expire"
+    - "Takeover is possible only in expert mode with `--takeover`"
+  related: [rcb.owner, rcb.resvtms, tool:rcb-no-free-instance, tool:rcb-owned-by-other-client]
+  hint: "Another client owns or has reserved this RCB (RptEna/Resv/ResvTms); run `rcb` to see the Owner and pick a free instance"
+  certainty: likely
+
+- id: data-access.temporarily-unavailable.gi
+  keys: *temp-unavailable
+  when: {service: gi}
+  hint: "GI only works on an RCB this client has enabled with the gi trigger set; `subscribe` first and check TrgOps"
+  certainty: likely
+
+- id: data-access.temporarily-unavailable.setgroup
+  keys: *temp-unavailable
+  when: {service: setgroup}
+  hint: "Another client is editing a setting group, or the device is still applying a group change; retry later"
+  certainty: likely
+
+- id: data-access.temporarily-unavailable.control
+  keys: *temp-unavailable
+  when: {service: [select, operate, cancel]}
+  hint: "The object is held by another command or selection right now; wait and check `stVal` and the last `origin`"
+  certainty: likely
+
+- id: data-access.invalid-address
+  keys: [data-access:invalid-address, ied:invalid-address, mms:definition-invalid-address]
+  title: Invalid address
+  summary: >-
+    The device could not use the address part of the request, for example an array index out of
+    range or a component that does not fit the object's structure.
+  next_checks:
+    - "Check array indices and sub-element names against `describe <reference>`"
+  related: [concept.object-reference]
+  hint: "array indices and component names against `describe`; the address does not fit the object"
+  certainty: check
+
+- id: data-access.hardware-fault
+  keys: [data-access:hardware-fault, ied:hardware-fault, mms:hardware-fault]
+  title: Hardware fault reported
+  summary: The device reports an internal hardware problem while accessing this object.
+  details: |
+    The fault may be confined to one I/O board. Do not keep retrying controls against a device that
+    reports hardware faults.
+  next_checks:
+    - "Read `LPHD1.PhyHealth` and the logical node's `Health`"
+    - "Check the device's front panel and event list"
+  related: [control.health, ln.lphd]
+  hint: "`LPHD1.PhyHealth`, `Health` and the device's front panel before retrying; the device reports a hardware problem"
+  certainty: check
+
+- id: data-access.object-attribute-inconsistent
+  keys: [data-access:object-attribute-inconsistent, ied:object-attribute-inconsistent, mms:definition-object-attribute-inconsistent]
+  title: Request inconsistent with the object
+  summary: The request's parameters conflict with how the object is defined on the device.
+  details: |
+    For example a dataset member list that does not match the objects, or parts of a structure that
+    do not line up with its definition.
+  next_checks:
+    - "Refresh the model with `ls --refresh` and compare with `describe <reference>`"
+  related: [data-access:type-inconsistent]
+  hint: "the model after `ls --refresh`, against `describe`; the request does not fit the object's definition on the device"
+  certainty: check
+
+- id: data-access.object-value-invalid
+  keys: &value-invalid [data-access:object-value-invalid, ied:object-value-invalid, mms:access-object-value-invalid]
+  title: Value not accepted
+  summary: >-
+    The device rejected the value itself: outside its allowed range, not an allowed choice, or not
+    allowed in the current state.
+  details: |
+    Many settings have limits and steps that the model does not show over MMS. Enumerations only
+    accept the values the device implements, which can be fewer than the standard allows.
+  next_checks:
+    - "Check the allowed range and step in the device documentation or the SCD (e.g. minVal, maxVal, stepSize where present)"
+    - "Read the current value to see a known-good example"
+  related: [check:writable-attribute-refused]
+  hint: "A value outside the device's range, step or allowed choices; read the current value and check the allowed range"
+  certainty: likely
+
+- id: data-access.object-value-invalid.rcb
+  keys: *value-invalid
+  when: {service: [set-rcb, subscribe]}
+  hint: "The RCB value is outside what the device accepts (e.g. IntgPd or BufTm limits, unsupported TrgOps bits, or an unknown EntryID)"
+  certainty: likely
+
+- id: data-access.object-value-invalid.control
+  keys: *value-invalid
+  when: {service: [select, operate]}
+  hint: "The ctlVal is not accepted (e.g. a position or step this object does not allow, or outside an INC range); check `describe` and the current `stVal`"
+  certainty: likely
+
+- id: data-access.object-invalidated
+  keys: [data-access:object-invalidated, ied:object-invalidated, mms:access-object-invalidated]
+  title: Object invalidated
+  summary: >-
+    The object existed but is no longer valid, typically because the device's configuration changed
+    or a dataset was deleted.
+  next_checks:
+    - "Refresh the model with `ls --refresh`"
+    - "Find out whether someone downloaded a new configuration to the device"
+  related: [check:confrev-mismatch]
+  hint: "The device's configuration changed, so the object is no longer valid; refresh the model with `ls --refresh`"
+  certainty: likely
+
+- id: data-access.unknown
+  keys: [data-access:unknown, ied:unknown]
+  title: Unknown error
+  summary: The device or the protocol library gave no specific reason.
+  details: |
+    The session log keeps the raw response. If a control was involved, look for an AddCause or
+    LastApplError next to this error; those are usually more informative.
+  next_checks:
+    - "Look at the raw response in the session log"
+    - "Run `explain` on any AddCause or LastApplError shown with it"
+  related: [control.lastapplerror, control.addcause]
+  hint: "the raw response in the log and any AddCause shown with it; no specific reason was given"
+  certainty: check
+
+- id: ied.object-exists
+  keys: [ied:object-exists, mms:definition-object-exists]
+  title: Object already exists
+  summary: An object with this name already exists on the device.
+  details: |
+    This happens when creating something whose name is taken, for example a dataset.
+  next_checks:
+    - "List existing objects with `ls` or `dataset` and choose another name"
+  related: [concept.dataset]
+  hint: "the existing names with `ls` or `dataset`; an object with this name already exists on the device"
+  certainty: check
+
+- id: ied.object-constraint-conflict
+  keys: [ied:object-constraint-conflict, mms:service-object-constraint-conflict]
+  title: Conflicts with a constraint on the object
+  summary: The request conflicts with a rule the device applies to this object in its current state.
+  details: |
+    Examples: changing an RCB attribute while the block is enabled, or writing setting-group values
+    without selecting a group for editing first.
+  next_checks:
+    - "For RCBs, disable (RptEna=false) before changing other attributes"
+    - "For settings, use `setgroup`, which runs the select-edit-confirm sequence"
+  related: [rcb.rptena, sgcb.sgcb]
+  hint: "The request conflicts with the object's current state (e.g. RCB still enabled, no group selected for editing)"
+  certainty: likely
+
+# -----------------------------------------------------------------------------------------------------
+# MMS-only service errors
+# -----------------------------------------------------------------------------------------------------
+- id: mms.conclude-rejected
+  keys: [mms:conclude-rejected]
+  title: Orderly release refused
+  summary: The device refused to close the association in the orderly way.
+  details: |
+    The tool then drops the connection. Some devices keep a dropped association, and its slot,
+    until their own timeout expires, which can block the next connection attempt.
+  next_checks:
+    - "If the next `connect` is refused, wait a few minutes before retrying"
+  related: [concept.association-slots, tool:slots-probably-exhausted]
+  hint: "whether the next `connect` succeeds; the device may keep this association (and its slot) until it times out"
+  certainty: check
+
+- id: mms.other
+  keys: [mms:other]
+  title: Unspecified MMS error
+  summary: The device returned an MMS error without a more specific class.
+  next_checks:
+    - "Look at the raw response in the session log"
+  related: [data-access:unknown]
+  hint: "the raw response in the session log; the device gave no specific reason"
+  certainty: check
+
+- id: mms.vmdstate-other
+  keys: [mms:vmdstate-other]
+  title: Device state does not allow the request
+  summary: >-
+    The device is in a state in which it cannot serve the request, for example starting up, loading
+    a configuration, or in a maintenance state.
+  next_checks:
+    - "Wait until the device has finished starting or loading, then retry"
+    - "Check the device's front panel for a maintenance or configuration state"
+  related: [control.mod]
+  hint: "The device is starting up, loading a configuration or in a maintenance state; retry later"
+  certainty: likely
+
+- id: mms.application-reference-other
+  keys: [mms:application-reference-other]
+  title: Application reference problem
+  summary: The device had a problem with the application addressing of the request.
+  details: |
+    Application addressing covers the AP title and AE qualifier that identify both ends of the
+    association. Most devices ignore them, but some check them.
+  next_checks:
+    - "Compare the addressing values in the SCD (ConnectedAP address) with the tool's settings"
+  related: [concept.acse, acse-diag.called]
+  hint: "the AP title and AE qualifier against the SCD; the device had a problem with the application addressing"
+  certainty: check
+
+- id: mms.definition-other
+  keys: [mms:definition-other]
+  title: Definition error
+  summary: The device reported a problem with the definition of an object, without more detail.
+  next_checks:
+    - "Refresh the model with `ls --refresh` and compare with `describe <reference>`"
+  related: [data-access:object-undefined]
+  hint: "the model after `ls --refresh`, against `describe`; the device reported a definition problem without detail"
+  certainty: check
+
+- id: mms.resource
+  keys: [mms:resource-other, mms:resource-capability-unavailable]
+  title: Device out of resources
+  summary: The device does not have the resources to serve the request right now.
+  details: |
+    Devices have fixed limits for memory, open files, pending requests and associations. Large
+    requests and many simultaneous clients use them up.
+  next_checks:
+    - "Ask for less at once"
+    - "Check how many clients are connected to the device"
+  related: [concept.association-slots, concept.pdu-size]
+  hint: "The device is short of resources (memory, pending requests, clients); ask for less at once and check how many clients are connected"
+  certainty: likely
+
+- id: mms.service-other
+  keys: [mms:service-other]
+  title: Service error
+  summary: The device could not perform the service, without saying why.
+  next_checks:
+    - "Look at the raw response in the session log"
+  related: [mms:other]
+  hint: "the raw response in the session log; the device could not perform this service and gave no reason"
+  certainty: check
+
+- id: mms.service-preempt-other
+  keys: [mms:service-preempt-other]
+  title: Service pre-empted
+  summary: The device interrupted the service before it completed.
+  next_checks:
+    - "Retry; look for a restart or configuration change on the device"
+  related: [ied:connection-lost]
+  hint: "for a device restart or configuration change, then retry; the device interrupted this request"
+  certainty: check
+
+- id: mms.time-resolution-other
+  keys: [mms:time-resolution-other]
+  title: Time resolution problem
+  summary: The device could not handle a time value in the request.
+  next_checks:
+    - "Check time values in the request (e.g. control time, report times) and the device's time settings"
+  related: [ln.ltim]
+  hint: "the time fields of the request and the device's time settings; the device could not handle a time value"
+  certainty: check
+
+- id: mms.access-other
+  keys: [mms:access-other]
+  title: Access error
+  summary: The device refused access to the object without a more specific reason.
+  next_checks:
+    - "Treat it like access denied: check the FC, access rules and source IP (`--as <client>`)"
+  related: [data-access:object-access-denied]
+  hint: "the FC (`describe`), the device's access rules and source-IP filtering; the device refused access without detail"
+  certainty: check
+
+# File service errors -------------------------------------------------------------------------------
+- id: mms.file-other
+  keys: [mms:file-other]
+  title: File error
+  summary: The device reported a problem with a file request, without more detail.
+  next_checks:
+    - "List the directory again with `files ls` and retry"
+  related: [concept.file-services]
+  hint: "the directory listing again with `files ls`, then retry; the device reported a file problem without detail"
+  certainty: check
+
+- id: mms.file-filename-ambiguous
+  keys: [mms:file-filename-ambiguous]
+  title: File name ambiguous
+  summary: The name given matches more than one file on the device.
+  next_checks:
+    - "Copy the exact name from `files ls`"
+  related: [concept.file-services]
+  hint: "the exact path from `files ls`; the name matches more than one file"
+  certainty: check
+
+- id: mms.file-file-busy
+  keys: [mms:file-file-busy]
+  title: File busy
+  summary: The file is in use on the device.
+  details: |
+    A disturbance record may still be being written, or another client may be reading the file.
+  next_checks:
+    - "Retry after a short wait"
+  related: [concept.file-services, ln.rdre]
+  hint: "The file is still being written, or another client is reading it; retry after a short wait"
+  certainty: likely
+
+- id: mms.file-filename-syntax-error
+  keys: [mms:file-filename-syntax-error]
+  title: File name syntax error
+  summary: The device does not accept the file name in this form.
+  details: |
+    Devices differ in path separators, leading slashes and letter case.
+  next_checks:
+    - "Copy the exact name from `files ls`"
+  related: [concept.file-services]
+  hint: "the exact path from `files ls`; the device does not accept this file name form"
+  certainty: check
+
+- id: mms.file-content-type-invalid
+  keys: [mms:file-content-type-invalid]
+  title: File content type invalid
+  summary: The device refused the request because of the file's content type.
+  next_checks:
+    - "Check the device documentation for which files can be transferred over MMS"
+  related: [concept.file-services]
+  hint: "which files the device lets clients transfer; it refused this one because of its content type"
+  certainty: check
+
+- id: mms.file-position-invalid
+  keys: [mms:file-position-invalid]
+  title: File position invalid
+  summary: A read asked for a position the file does not have.
+  details: |
+    The file may have changed or shrunk during the download, or the device does not support
+    resuming at that position.
+  next_checks:
+    - "Download the file again from the start"
+  related: [concept.file-services]
+  hint: "The file changed during the download, or the device cannot resume there; download it again from the start"
+  certainty: likely
+
+- id: mms.file-file-access-denied
+  keys: [mms:file-file-access-denied]
+  title: File access denied
+  summary: The device refused access to this file.
+  details: |
+    Devices often protect configuration, security and firmware files; some only allow file access
+    for particular clients.
+  next_checks:
+    - "Try another file to see whether all file access is refused"
+    - "Check the device's file access settings"
+  related: [data-access:object-access-denied, concept.file-services]
+  hint: "whether the device allows file access for this client at all; it protects this file"
+  certainty: check
+
+- id: mms.file-file-non-existent
+  keys: [mms:file-file-non-existent]
+  title: File does not exist
+  summary: There is no file with this name on the device.
+  details: |
+    File names are case-sensitive on many devices, and recorders delete or rotate old files.
+  next_checks:
+    - "List the directory with `files ls` and copy the name"
+  related: [concept.file-services]
+  hint: "the name with `files ls` (often case-sensitive; old records get rotated); no such file on the device"
+  certainty: check
+
+- id: mms.file-duplicate-filename
+  keys: [mms:file-duplicate-filename]
+  title: Duplicate file name
+  summary: A file with this name already exists on the device.
+  details: |
+    This only happens when creating or renaming files, which this tool does not do in v1.
+  next_checks:
+    - "Report the command you ran to the tool maintainers"
+  related: [concept.file-services]
+  hint: "the existing file names with `files ls`; a file with this name already exists on the device"
+  certainty: check
+
+- id: mms.file-insufficient-space
+  keys: [mms:file-insufficient-space-in-filestore]
+  title: Device storage full
+  summary: The device's file storage is full.
+  details: |
+    A full store can also stop the device from recording new disturbance records.
+  next_checks:
+    - "Check the device's recorder and storage settings"
+  related: [ln.rdre]
+  hint: "The device's file storage is full; this can also stop new disturbance records from being saved"
+  certainty: likely
+
+# Rejects: the device refused the request message as a whole -----------------------------------------
+- id: mms.reject-other
+  keys: [mms:reject-other]
+  title: Request rejected
+  summary: The device rejected the request message as a whole, without a specific reason.
+  next_checks:
+    - "Capture the exchange with Wireshark and keep it with an incident file"
+  related: [scope.passive-capture, ied:malformed-message]
+  hint: "the exchange in a Wireshark capture, and record it; the device rejected the request message as a whole"
+  certainty: check
+
+- id: mms.reject-unknown-pdu-type
+  keys: [mms:reject-unknown-pdu-type]
+  title: Message type not recognised
+  summary: The device did not recognise the type of message it received.
+  details: |
+    This points to an implementation difference between the device and the protocol library.
+  next_checks:
+    - "Capture the exchange with Wireshark and record it as a device quirk"
+  related: [scope.passive-capture]
+  hint: "An implementation difference between the device and the protocol library; capture it and record a device quirk"
+  certainty: likely
+
+- id: mms.reject-invalid-pdu
+  keys: [mms:reject-invalid-pdu]
+  title: Message considered invalid
+  summary: The device considered the request message malformed.
+  details: |
+    Messages larger than the negotiated maximum size, or encodings the device does not accept, can
+    cause this.
+  next_checks:
+    - "Ask for less at once, and look at the negotiated PDU size in `info`"
+    - "Capture the exchange with Wireshark"
+  related: [concept.pdu-size]
+  hint: "A message larger than the negotiated size, or an encoding the device does not accept; ask for less at once"
+  certainty: likely
+
+- id: mms.reject-unrecognized-modifier
+  keys: [mms:reject-unrecognized-modifier]
+  title: Request modifier not recognised
+  summary: The device did not recognise an optional modifier in the request.
+  next_checks:
+    - "Capture the exchange with Wireshark and record it as a device quirk"
+  related: [scope.passive-capture]
+  hint: "the exchange in a Wireshark capture, and record a device quirk; the device did not understand an optional part of the request"
+  certainty: check
+
+- id: mms.reject-request-invalid-argument
+  keys: [mms:reject-request-invalid-argument]
+  title: Request argument not acceptable
+  summary: The device rejected an argument in the request.
+  next_checks:
+    - "Check the object reference and value; run `describe <reference>`"
+  related: [ied:user-provided-invalid-argument]
+  hint: "A reference or value the device does not accept; check them with `describe`"
+  certainty: likely

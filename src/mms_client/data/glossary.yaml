@@ -1,0 +1,588 @@
+# Glossary: general concepts (modelling basics, data quality, editions, MMS/ACSE, scope, tool).
+# More glossary files are in data/glossary/ (LN classes, CDCs, FCs, controls, reports, settings).
+# Format: see the header of data/hints.yaml. Glossary entries have no keys and no hint.
+
+version: 1
+entries:
+
+# -----------------------------------------------------------------------------------------------------
+# Modelling basics
+# -----------------------------------------------------------------------------------------------------
+- id: concept.object-reference
+  kind: concept
+  terms: [object reference, reference, ObjRef]
+  title: Object reference
+  summary: >-
+    The full name of an object on a device, written LogicalDevice/LogicalNode.DataObject.Attribute,
+    for example `CTRL/CSWI1.Pos.stVal`.
+  details: |
+    - The logical device part is the IED name followed by the LD instance (e.g. `F12CTRL`), so it
+      changes when an IED is renamed in the configuration.
+    - The logical node part is an optional prefix, the four-letter class and an instance number
+      (e.g. `Q0XCBR1`).
+    - An attribute is only fully identified together with its functional constraint (FC), because
+      one data object has attributes under several FCs.
+
+    References are case-sensitive. Over MMS the same object appears as a variable in the logical
+    device's domain, with `$` separators and the FC inserted after the logical node, which is what
+    Wireshark shows.
+  next_checks:
+    - "Use `ls`, `cd`, `tree` and tab completion to build references from the model"
+  related: [concept.logical-device, concept.logical-node, concept.fc, concept.named-variable]
+
+- id: concept.logical-device
+  kind: concept
+  terms: [LD, logical device]
+  title: Logical device (LD)
+  summary: >-
+    A group of related functions inside an IED, such as protection, control or measurement. Over
+    MMS each logical device is a domain.
+  details: |
+    One IED can hold several logical devices. Each has its own LLN0, which carries the mode and
+    health of the whole logical device, and its datasets and control blocks.
+  related: [ln.lln0, concept.mms-domain, concept.object-reference]
+
+- id: concept.logical-node
+  kind: concept
+  terms: [LN, logical node, LN class]
+  title: Logical node (LN)
+  summary: >-
+    One function inside a logical device, identified by a four-letter class name that says what it
+    does (XCBR is a circuit breaker, PTOC an overcurrent protection, MMXU a measurement).
+  details: |
+    The first letter gives the group: L system, P protection, R protection-related, C control,
+    G generic, I interfacing, A automatic control, M metering and measurement, S sensors and
+    supervision, T instrument transformers, X switchgear, Y power transformers, Z other equipment.
+    `explain <class>` explains the common classes.
+  related: [concept.data-object, ln.lln0, ln.xcbr]
+
+- id: concept.data-object
+  kind: concept
+  terms: [DO, data object]
+  title: Data object (DO)
+  summary: >-
+    A named piece of information inside a logical node, such as `Pos` (position) or `Op`
+    (operated). Its common data class (CDC) defines which attributes it has.
+  related: [concept.cdc, concept.data-attribute]
+
+- id: concept.data-attribute
+  kind: concept
+  terms: [DA, data attribute]
+  title: Data attribute (DA)
+  summary: >-
+    A single value inside a data object, such as `stVal`, `q` or `t`, always with a functional
+    constraint (FC) that says what kind of value it is.
+  related: [concept.fc, concept.quality, concept.timestamp]
+
+- id: concept.fc
+  kind: concept
+  terms: [FC, functional constraint]
+  title: Functional constraint (FC)
+  summary: >-
+    A two-letter tag on every attribute saying what kind of value it is (status, measurement,
+    setting, configuration, control, …) and therefore whether and how it can be written.
+  details: |
+    The FC is part of the address: reading `Pos.stVal` means reading it under FC=ST. `explain <FC>`
+    (e.g. `explain ST`) describes each one. This tool treats SP, SV, CF, DC, EX and BL as normally
+    writable; other FCs can only be written in expert mode, and SE values only through `setgroup`.
+  related: [fc.st, fc.mx, fc.sp, fc.cf, fc.co, fc.se]
+
+- id: concept.cdc
+  kind: concept
+  terms: [CDC, common data class]
+  title: Common data class (CDC)
+  summary: >-
+    The template a data object follows, fixing its attributes. For example every DPC (controllable
+    double point) has a position value, quality, timestamp and control structures.
+  details: |
+    Status classes end in S (SPS, DPS, INS, ENS), controllable classes in C (SPC, DPC, INC, ENC),
+    settings in G (SPG, ING, ENG, ASG), and measurements are MV, CMV, WYE, DEL and friends.
+    `explain <CDC>` (e.g. `explain DPC`) describes each one.
+  related: [cdc.dpc, cdc.sps, cdc.mv, concept.data-object]
+
+- id: concept.dataset
+  kind: concept
+  terms: [dataset, data set, named variable list, NVL, DataSet]
+  title: Dataset (named variable list)
+  summary: >-
+    An ordered list of attributes or data objects that are sent together, used by report control
+    blocks (and GOOSE). Over MMS a dataset is a named variable list.
+  details: |
+    Report contents follow the dataset's member order, so both sides must agree on it. Changing a
+    dataset changes the ConfRev of every block that uses it. `dataset <name>` lists the members and
+    whether each resolves on the device.
+  next_checks:
+    - "Run `dataset <name>` to list members"
+  related: [rcb.datset, rcb.confrev, check:dataset-mismatch]
+
+- id: concept.scl
+  kind: concept
+  terms: [SCL, SCD, CID, ICD, IID, SSD, substation configuration language]
+  title: SCL files (SCD, CID, ICD, IID)
+  summary: >-
+    The XML files that describe substation configuration: what each IED contains and how they
+    communicate.
+  details: |
+    - ICD: an IED's capabilities as delivered by the vendor (a template).
+    - IID: one IED's configuration exchanged with the system tool.
+    - SCD: the whole substation or rack: all IEDs, their communication addresses, datasets, control
+      blocks and which client uses which report control block.
+    - CID: the configuration actually loaded into one IED, usually exported from the SCD.
+
+    This tool can compare a device against an SCD, a CID or a snapshot. A CID shows whether the
+    device matches its own configuration; the SCD also shows whether it matches what its neighbours
+    expect.
+  related: [check:device-supplied-reference, check:confrev-mismatch, concept.edition]
+
+- id: concept.ldns
+  kind: concept
+  terms: [ldNs, LD namespace, lnNs]
+  title: Logical device namespace (ldNs)
+  summary: >-
+    A text in `LLN0.NamPlt` naming the version of the standard the logical device follows. The tool
+    uses it to infer the edition.
+  details: |
+    A namespace mentioning 2003 points to Ed1, 2007 to Ed2, and later revisions to Ed2.1. It is the
+    device's own claim and is sometimes missing or left at a default.
+  related: [concept.edition, cdc.lpl]
+
+- id: concept.timestamp
+  kind: concept
+  terms: [t, timestamp, time stamp]
+  title: Timestamp (t)
+  summary: >-
+    The time at which the device last saw the value or its quality change, set by the device.
+  details: |
+    The timestamp includes quality flags of its own, such as whether the device's clock was
+    synchronised. A timestamp far in the past or future usually means the device's time
+    synchronisation is not working.
+  related: [ln.ltim, ln.ltms, concept.quality]
+
+# -----------------------------------------------------------------------------------------------------
+# Data quality
+# -----------------------------------------------------------------------------------------------------
+- id: concept.quality
+  kind: concept
+  terms: [q, quality]
+  title: Quality (q)
+  summary: >-
+    A set of flags attached to a value saying how far it can be trusted: validity, detailed
+    reasons, whether it was substituted, whether it is a test value, and whether an operator blocked
+    it.
+  details: |
+    Always look at the quality before trusting a value. A value can be present and still be marked
+    invalid or questionable. The parts are explained separately: `explain validity`,
+    `explain detailQual`, `explain quality.source`, `explain quality.test`,
+    `explain operatorBlocked`.
+  related: [quality.validity, quality.detail-quality, quality.source, quality.test, quality.operator-blocked]
+
+- id: quality.validity
+  kind: term
+  terms: [validity, good, questionable]
+  title: "Quality: validity"
+  summary: >-
+    The main verdict on a value: good, invalid, or questionable (the device has doubts).
+  details: |
+    Invalid means the value must not be used, for example because the input board failed.
+    Questionable means the device is not sure, for example because the value is old or outside
+    its normal range; the detail flags say why.
+  related: [concept.quality, quality.detail-quality]
+
+- id: quality.detail-quality
+  kind: term
+  terms: [detailQual, detail quality, oldData, badReference, outOfRange, oscillatory, inaccurate]
+  title: "Quality: detail flags"
+  summary: >-
+    Flags that explain why a value is invalid or questionable.
+  details: |
+    - overflow: the value did not fit its representation
+    - outOfRange: the value is outside its defined range
+    - badReference: a reference used to produce the value (e.g. a calibration) is faulty
+    - oscillatory: an input is changing so fast that the device suppresses it
+    - failure: an internal supervision found a fault
+    - oldData: the value has not been refreshed within its expected time
+    - inconsistent: an evaluation found the value inconsistent with others
+    - inaccurate: the value does not meet its stated accuracy
+  related: [concept.quality, quality.validity]
+
+- id: quality.source
+  kind: term
+  terms: [quality.source, substituted]
+  title: "Quality: source"
+  summary: >-
+    Whether the value comes from the process or was substituted, for example by an operator or a
+    test tool.
+  related: [concept.quality, fc.sv]
+
+- id: quality.test
+  kind: term
+  terms: [quality.test, test bit]
+  title: "Quality: test flag"
+  summary: >-
+    Marks a value produced while the function is being tested; receivers normally do not treat it
+    as a real process value.
+  related: [concept.quality, control.mod, control.test]
+
+- id: quality.operator-blocked
+  kind: term
+  terms: [operatorBlocked, operator blocked]
+  title: "Quality: operator blocked"
+  summary: >-
+    The value is frozen because an operator blocked updates (see the BL functional constraint).
+  related: [concept.quality, fc.bl]
+
+# -----------------------------------------------------------------------------------------------------
+# Editions
+# -----------------------------------------------------------------------------------------------------
+- id: concept.edition
+  kind: concept
+  terms: [edition, editions]
+  title: Editions of the standard
+  summary: >-
+    IEC 61850 exists as Edition 1, Edition 2 and Edition 2.1. Devices and clients of different
+    editions mostly work together, but several behaviours this tool checks depend on the edition.
+  details: |
+    What changes between editions, as far as this tool is concerned:
+    - new attributes and objects (e.g. BRCB `ResvTms` and `Owner`, `LocSta`, LN `Beh`-based test
+      handling, `LPHD.Sim`, GOOSE supervision LGOS)
+    - enumerated classes (ENS, ENC, ENG) replacing integer ones for things like `Mod` and `Beh`
+    - longer object reference limits, so names valid on Ed2 may be too long for an Ed1 client
+    - a different SCL schema
+
+    The tool determines each device's edition from the inventory, the SCL, `LLN0.NamPlt.ldNs` or
+    heuristics, and shows how it knows. Edition-dependent checks do not run while the edition is
+    unknown.
+  next_checks:
+    - "Run `info` to see the edition and where it came from"
+    - "Record the edition in the inventory if it is known"
+  related: [edition.ed1, edition.ed2, edition.ed2-1, concept.ldns, tool:edition-unknown]
+
+- id: edition.ed1
+  kind: term
+  terms: [Ed1, Edition 1]
+  title: Edition 1 (Ed1)
+  summary: >-
+    The first edition (published from 2003). Many devices still in service follow it.
+  details: |
+    Ed1 devices have no `LocSta`, no BRCB `ResvTms`/`Owner`, and use integer classes where later
+    editions use enumerations. Their namespace (`ldNs`) mentions 2003.
+  related: [concept.edition, edition.ed2]
+
+- id: edition.ed2
+  kind: term
+  terms: [Ed2, Edition 2]
+  title: Edition 2 (Ed2)
+  summary: >-
+    The second edition (published from 2007 onwards). It added many attributes and clarified test
+    and simulation handling.
+  details: |
+    Relevant additions include `LocSta`, BRCB `ResvTms` and `Owner`, the OR and SR functional
+    constraints, enumerated classes (ENS/ENC/ENG), GOOSE/SV supervision nodes (LGOS/LSVS), service
+    tracking (LTRK) and longer reference limits. Its namespace (`ldNs`) mentions 2007.
+  related: [concept.edition, edition.ed1, edition.ed2-1]
+
+- id: edition.ed2-1
+  kind: term
+  terms: [Ed2.1, Edition 2.1]
+  title: Edition 2.1 (Ed2.1)
+  summary: >-
+    An amended Edition 2. This tool treats it as Ed2 plus additions.
+  related: [concept.edition, edition.ed2]
+
+# -----------------------------------------------------------------------------------------------------
+# MMS and ACSE
+# -----------------------------------------------------------------------------------------------------
+- id: concept.mms
+  kind: concept
+  terms: [MMS, Manufacturing Message Specification]
+  title: MMS
+  summary: >-
+    The client/server protocol that IEC 61850 uses for reading, writing, controls, reports and files
+    between a client (SCADA gateway, HMI, this tool) and an IED.
+  details: |
+    MMS runs over TCP port 102 through a stack of ISO layers. GOOSE and Sampled Values are
+    different protocols that do not use MMS, which is why this tool cannot see them.
+  related: [concept.association, concept.iso-stack, scope.goose]
+
+- id: concept.association
+  kind: concept
+  terms: [association, MMS association]
+  title: Association
+  summary: >-
+    The connection between an MMS client and a device, set up once and then used for every request.
+  details: |
+    Setting up an association takes several steps: TCP connection, ISO transport and session,
+    ACSE association and the MMS initiate. The device keeps resources for each open association,
+    which is why the number of associations it accepts is limited.
+
+    The shell keeps one association open for the whole session. Connecting and disconnecting
+    repeatedly uses up slots and can itself cause the faults under investigation.
+  related: [concept.association-slots, concept.iso-stack, concept.mms-initiate, concept.acse]
+
+- id: concept.association-slots
+  kind: concept
+  terms: [association slots, slots, association limit, max associations]
+  title: Association slots
+  summary: >-
+    The limited number of associations a device serves at the same time. When all are taken, new
+    clients are refused.
+  details: |
+    Things worth knowing on a test rack:
+    - The limit differs per device model and firmware, and may be small.
+    - The protocol has no way to ask how many slots exist or how many are used. `diagnose` shows the
+      known limit and release behaviour when the quirks file has them.
+    - Devices refuse extra clients in different ways: TCP refused, connection closed at once,
+      association rejected, or accepted and then closed.
+    - A client that disconnects abruptly (crash, cable pulled, killed process) can leave a stale
+      association behind. The device keeps its slot until its own supervision times it out.
+    - This tool occupies one slot while connected.
+  next_checks:
+    - "Run `diagnose <device>` to classify how the device refuses"
+    - "List which clients (gateway, HMI, test tools) should be connected"
+  related: [tool:slots-probably-exhausted, tool:association-slot-occupied-by-tool, concept.association]
+
+- id: concept.mms-initiate
+  kind: concept
+  terms: [initiate, MMS initiate]
+  title: MMS initiate
+  summary: >-
+    The last step of setting up an association, in which client and device agree on the maximum
+    message size, the number of requests that may be outstanding, and the services each supports.
+  details: |
+    `info` shows the negotiated values. A small maximum message size or a single outstanding request
+    makes large reads slower but should not make them fail.
+  related: [concept.pdu-size, concept.association, ied:service-not-supported]
+
+- id: concept.pdu-size
+  kind: concept
+  terms: [PDU size, maxPduSize, max PDU size, PDU]
+  title: PDU size
+  summary: >-
+    The largest MMS message either side accepts, agreed during the MMS initiate.
+  details: |
+    Requests and answers larger than this must be split. Reading a very large structure at once can
+    fail on devices with a small limit; reading smaller parts avoids it.
+  related: [concept.mms-initiate]
+
+- id: concept.mms-domain
+  kind: concept
+  terms: [domain, MMS domain]
+  title: MMS domain
+  summary: >-
+    MMS's name for a container of variables. In IEC 61850 each logical device is one domain.
+  related: [concept.logical-device, concept.named-variable]
+
+- id: concept.named-variable
+  kind: concept
+  terms: [named variable, MMS variable, variable]
+  title: Named variable
+  summary: >-
+    MMS's name for a readable/writable object. Each logical node is a named variable in its logical
+    device's domain; data objects and attributes are components of it, grouped by FC.
+  related: [concept.object-reference, concept.mms-domain, concept.dataset]
+
+- id: concept.getnamelist
+  kind: concept
+  terms: [GetNameList]
+  title: GetNameList
+  summary: >-
+    The MMS service that lists names: the domains (logical devices), the variables in a domain, or
+    the named variable lists (datasets). Browsing uses it.
+  related: [concept.getvariableaccessattributes, concept.mms-domain]
+
+- id: concept.getvariableaccessattributes
+  kind: concept
+  terms: [GetVariableAccessAttributes, GetVarAccessAttr, variable access attributes]
+  title: GetVariableAccessAttributes
+  summary: >-
+    The MMS service that returns the type description of a variable. The tool uses it to learn each
+    attribute's type, so write values are never guessed from what was typed.
+  related: [concept.getnamelist, tool:write-type-unsupported]
+
+- id: concept.identify
+  kind: concept
+  terms: [Identify, MMS Identify]
+  title: Identify
+  summary: >-
+    The MMS service that returns vendor, model and revision of the MMS server implementation.
+  details: |
+    It often describes the communication stack inside the device rather than the device itself, so
+    the tool compares it with `LPHD.PhyNam` and `LLN0.NamPlt` and shows any disagreement.
+  related: [check:identity-disagreement, cdc.dpl, cdc.lpl]
+
+- id: concept.file-services
+  kind: concept
+  terms: [file services, files, FileDirectory, FileOpen, FileRead]
+  title: MMS file services
+  summary: >-
+    Services for listing and transferring files on a device, such as disturbance records (COMTRADE),
+    logs and SCL files.
+  details: |
+    This tool only lists (`files ls`) and downloads (`files get`) in v1. Uploading or deleting is
+    deliberately left out: on many IEDs an uploaded file installs configuration or firmware.
+  related: [ln.rdre, concept.scl]
+
+- id: concept.acse
+  kind: concept
+  terms: [ACSE, AP title, AE qualifier]
+  title: ACSE
+  summary: >-
+    The association control layer below MMS. It opens and closes the association and can carry
+    addressing values (AP title, AE qualifier) and authentication.
+  details: |
+    Most devices ignore the addressing values; some check them against their configuration (from
+    the SCL's communication section). Authentication is carried here too, which this tool does not
+    support in v1.
+  related: [concept.iso-stack, acse-diag.called, acse-diag.calling, scope.security]
+
+- id: concept.iso-stack
+  kind: concept
+  terms: [ISO stack, COTP, TPKT, TCP 102, port 102, TSEL, SSEL, PSEL, OSI selectors]
+  title: The ISO layers under MMS
+  summary: >-
+    MMS runs over TCP port 102 through several thin ISO layers: TPKT, the transport layer (COTP),
+    session, presentation and ACSE. Each can refuse an association on its own.
+  details: |
+    The transport, session and presentation layers carry selectors (TSEL, SSEL, PSEL). Most devices
+    accept any values, but some insist on the ones configured in the SCL (ConnectedAP address,
+    OSI-TSEL / OSI-SSEL / OSI-PSEL). `diagnose` probes the layers one at a time to find the one that
+    refuses.
+  related: [concept.association, concept.acse]
+
+# -----------------------------------------------------------------------------------------------------
+# Out of scope (the tool must say so wherever users might assume otherwise)
+# -----------------------------------------------------------------------------------------------------
+- id: scope.goose
+  kind: concept
+  terms: [GOOSE, GoCB, GOOSE control block]
+  title: GOOSE (out of scope)
+  summary: >-
+    GOOSE is a fast multicast message that devices use to send signals to each other (trips,
+    interlocking, positions). It is not MMS, and this tool cannot observe it.
+  details: |
+    Bay-level control and interlocking between a bay controller and other IEDs is often done over
+    GOOSE. When such a path fails, this tool only sees the consequences (for example interlocking
+    that stays blocked), not the messages.
+
+    What helps:
+    - Wireshark on the station bus shows GOOSE messages directly.
+    - Many Ed2 subscribers have a GOOSE supervision node (LGOS) that this tool can read over MMS to
+      see whether the subscriber thinks its GOOSE is arriving.
+    - GOOSE control block (GoCB) inspection over MMS is planned for a later version.
+  next_checks:
+    - "Capture the station bus with Wireshark and filter on GOOSE"
+    - "Read `LGOS*` on the subscribing device, if present"
+  related: [ln.lgos, scope.passive-capture, fc.go, tool:goose-out-of-scope]
+
+- id: scope.sampled-values
+  kind: concept
+  terms: [Sampled Values, SMV, sampled value stream, SVCB, 9-2]
+  title: Sampled Values (out of scope)
+  summary: >-
+    Sampled Values are streams of digitised currents and voltages on a process bus. They are not
+    MMS, and this tool cannot observe them.
+  details: |
+    Note that the functional constraint SV means substitution, not Sampled Values. Subscribers may
+    have an SV supervision node (LSVS) that can be read over MMS. Use Wireshark to see the streams.
+  related: [ln.lsvs, fc.sv, fc.ms, scope.passive-capture]
+
+- id: scope.security
+  kind: concept
+  terms: [IEC 62351, "62351", TLS, ACSE authentication, authentication, communication security, port 3782]
+  title: Communication security (not supported in v1)
+  summary: >-
+    IEC 62351 adds TLS encryption and authentication to MMS. This tool does not support them in v1;
+    it can only detect that a device seems to require them.
+  details: |
+    Signs that a device requires security: TCP 102 closed while TCP 3782 (MMS over TLS) is open, or
+    an association rejection with an authentication diagnostic. `diagnose` says so explicitly
+    instead of reporting a generic connection failure.
+  related: [tool:security-not-supported, association:tls-suspected, association:authentication-suspected]
+
+- id: scope.passive-capture
+  kind: concept
+  terms: [Wireshark, packet capture, pcap, passive capture]
+  title: Packet capture (outside this tool)
+  summary: >-
+    This tool is an active MMS client: it only sees its own conversations. To see traffic between
+    other devices (MMS between a gateway and an IED, GOOSE, Sampled Values) use a packet capture tool
+    such as Wireshark.
+  details: |
+    Wireshark decodes MMS, GOOSE and Sampled Values. Capture from a mirror port on the rack switch or
+    a tap, and keep the capture with the incident file.
+  related: [scope.goose, scope.sampled-values]
+
+- id: scope.logs
+  kind: concept
+  terms: [LCB, log control block, IEC 61850 logs, QueryLogByTime, QueryLogAfter]
+  title: IEC 61850 logs (later version)
+  summary: >-
+    Devices can keep logs of data values, controlled by log control blocks (LCB). Querying them is
+    planned for a later version of this tool.
+  details: |
+    Note that these logs record data values, not MMS connection events, so they do not show who
+    connected when.
+  related: [fc.lg]
+
+# -----------------------------------------------------------------------------------------------------
+# This tool
+# -----------------------------------------------------------------------------------------------------
+- id: concept.tool-modes
+  kind: concept
+  terms: [tool modes, standard mode, expert mode]
+  title: Standard and expert mode
+  summary: >-
+    Standard mode (the default) allows everyday work; expert mode adds actions for negative testing
+    and takeover. Modes are a guardrail against mistakes, not access control.
+  details: |
+    - Standard: browsing, reads, writes to normally writable values (SP, SV, CF, DC, EX, BL),
+      controls with interlock and synchrocheck checks on and orCat bay/station/remote, subscribing
+      to free report control blocks.
+    - Expert (`--expert`, or `set mode expert` in the shell): additionally RCB takeover, clearing
+      interlock/synchrocheck check flags, the other orCat values, and writes to values that are not
+      normally writable.
+
+    The shell prompt always shows the current mode.
+  related: [tool:refused-standard-mode, concept.safety-profile]
+
+- id: concept.safety-profile
+  kind: concept
+  terms: [safety profile, safety]
+  title: Safety profile
+  summary: >-
+    How much confirmation the tool asks for, set per rack in the inventory: `strict` (default) or
+    `lab`.
+  details: |
+    In `strict`, controls and takeovers need the object name typed as confirmation; in `lab` a
+    yes/no prompt is enough. `--yes` can skip write confirmations but never control or takeover
+    confirmations. The rack's IEDs are real devices with real outputs.
+  related: [concept.tool-modes]
+
+- id: concept.acting-as-client
+  kind: concept
+  terms: [acting as client, act as neighbour, "--as", source IP, local IP]
+  title: Acting as a known client (--as)
+  summary: >-
+    `--as <client>` makes the tool behave like a client from the inventory: it sends from that
+    client's source IP and uses the report control blocks assigned to it.
+  details: |
+    Some devices only accept clients from known addresses, or give different rights to different
+    clients. Acting as the real neighbour shows whether that neighbour could do what it needs.
+
+    The address must exist on a network interface of this computer (the tool checks and prints the
+    `ip addr add` command if it does not). Do not use a neighbour's address while the neighbour is
+    connected to the same network.
+  related: [tool:local-address-missing, check:writable-attribute-refused]
+
+- id: concept.certainty
+  kind: concept
+  terms: [certainty, hint certainty, likely cause]
+  title: How sure a hint is
+  summary: >-
+    Every hint states how certain it is: a plain statement is something the tool has proved,
+    "Likely cause:" is an inference, and "Check:" is something for you to verify.
+  details: |
+    The tool only states a diagnosis as fact when it has proved it, for example that an attribute
+    is read-only because the device's model gives it a status FC. Vendors differ widely, so most
+    hints are "likely" or "check". `--terse` hides hints.
+  related: [concept.tool-modes]

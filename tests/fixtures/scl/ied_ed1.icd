@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Hand-written test fixture for mms-client: a small Edition 1 (2003 schema) ICD.
+     No version attributes on <SCL>. Vendor, model and values are fictitious. -->
+<SCL xmlns="http://www.iec.ch/61850/2003/SCL">
+  <Header id="TEMPLATE" nameStructure="IEDName"/>
+  <IED name="TEMPLATE" type="IO-8" manufacturer="Oldco" configVersion="1.0">
+    <Services>
+      <DynAssociation/>
+      <GetDirectory/>
+      <GetDataObjectDefinition/>
+      <DataObjectDirectory/>
+      <GetDataSetValue/>
+      <DataSetDirectory/>
+      <ConfDataSet max="4" maxAttributes="20"/>
+      <ReadWrite/>
+      <ConfReportControl max="4"/>
+      <GetCBValues/>
+      <ReportSettings cbName="Conf" datSet="Conf" rptID="Dyn" optFields="Dyn" bufTime="Dyn" trgOps="Dyn" intgPd="Dyn"/>
+      <ConfLNs fixPrefix="true" fixLnInst="true"/>
+    </Services>
+    <AccessPoint name="AP1">
+      <Server>
+        <Authentication/>
+        <LDevice inst="LD0">
+          <LN0 lnClass="LLN0" inst="" lnType="OC_LLN0">
+            <DataSet name="Events">
+              <FCDA ldInst="LD0" prefix="" lnClass="GGIO" lnInst="1" doName="Ind1" daName="stVal" fc="ST"/>
+              <FCDA ldInst="LD0" prefix="" lnClass="GGIO" lnInst="1" doName="Ind2" daName="stVal" fc="ST"/>
+              <FCDA ldInst="LD0" prefix="" lnClass="GGIO" lnInst="1" doName="SPCSO1" fc="ST"/>
+            </DataSet>
+            <DataSet name="Analogs">
+              <FCDA ldInst="LD0" prefix="" lnClass="GGIO" lnInst="1" doName="AnIn1" fc="MX"/>
+            </DataSet>
+            <ReportControl name="rcbEvents" rptID="TEMPLATE_Events" datSet="Events" confRev="1" intgPd="0">
+              <TrgOps dchg="true" qchg="true"/>
+              <OptFields seqNum="true" timeStamp="true" dataSet="true" reasonCode="true"/>
+              <RptEnabled max="2"/>
+            </ReportControl>
+            <ReportControl name="brcbAnalogs" datSet="Analogs" confRev="1" buffered="true" bufTime="200" intgPd="10000">
+              <TrgOps dchg="true" period="true"/>
+              <OptFields seqNum="true" timeStamp="true" entryID="true"/>
+            </ReportControl>
+            <DOI name="Mod">
+              <DAI name="stVal"><Val>on</Val></DAI>
+              <DAI name="ctlModel"><Val>status-only</Val></DAI>
+            </DOI>
+            <DOI name="NamPlt">
+              <DAI name="vendor"><Val>Oldco</Val></DAI>
+              <DAI name="swRev"><Val>1.07</Val></DAI>
+              <DAI name="configRev"><Val>1</Val></DAI>
+              <DAI name="ldNs"><Val>IEC 61850-7-4:2003</Val></DAI>
+            </DOI>
+          </LN0>
+          <LN lnClass="LPHD" inst="1" lnType="OC_LPHD" prefix="">
+            <DOI name="PhyNam">
+              <DAI name="vendor"><Val>Oldco</Val></DAI>
+              <DAI name="model"><Val>IO-8</Val></DAI>
+            </DOI>
+          </LN>
+          <LN lnClass="GGIO" inst="1" lnType="OC_GGIO" prefix="">
+            <DOI name="SPCSO1">
+              <DAI name="ctlModel"><Val>direct-with-normal-security</Val></DAI>
+            </DOI>
+            <DOI name="AnIn1">
+              <DAI name="db"><Val>100</Val></DAI>
+            </DOI>
+          </LN>
+        </LDevice>
+      </Server>
+    </AccessPoint>
+  </IED>
+  <DataTypeTemplates>
+    <LNodeType id="OC_LLN0" lnClass="LLN0">
+      <DO name="Mod" type="OC_INC_Mod"/>
+      <DO name="Beh" type="OC_INS_Beh"/>
+      <DO name="Health" type="OC_INS_Health"/>
+      <DO name="NamPlt" type="OC_LPL"/>
+    </LNodeType>
+    <LNodeType id="OC_LPHD" lnClass="LPHD">
+      <DO name="PhyNam" type="OC_DPL"/>
+      <DO name="PhyHealth" type="OC_INS_Health"/>
+      <DO name="Proxy" type="OC_SPS"/>
+    </LNodeType>
+    <LNodeType id="OC_GGIO" lnClass="GGIO">
+      <DO name="Mod" type="OC_INC_Mod"/>
+      <DO name="Beh" type="OC_INS_Beh"/>
+      <DO name="Health" type="OC_INS_Health"/>
+      <DO name="NamPlt" type="OC_LPL"/>
+      <DO name="Ind1" type="OC_SPS"/>
+      <DO name="Ind2" type="OC_SPS"/>
+      <DO name="SPCSO1" type="OC_SPC"/>
+      <DO name="AnIn1" type="OC_MV"/>
+    </LNodeType>
+    <DOType id="OC_INC_Mod" cdc="INC">
+      <DA name="stVal" bType="Enum" type="Mod" fc="ST" dchg="true"/>
+      <DA name="q" bType="Quality" fc="ST" qchg="true"/>
+      <DA name="t" bType="Timestamp" fc="ST"/>
+      <DA name="ctlModel" bType="Enum" type="ctlModel" fc="CF"/>
+    </DOType>
+    <DOType id="OC_INS_Beh" cdc="INS">
+      <DA name="stVal" bType="Enum" type="Beh" fc="ST" dchg="true"/>
+      <DA name="q" bType="Quality" fc="ST" qchg="true"/>
+      <DA name="t" bType="Timestamp" fc="ST"/>
+    </DOType>
+    <DOType id="OC_INS_Health" cdc="INS">
+      <DA name="stVal" bType="Enum" type="Health" fc="ST" dchg="true"/>
+      <DA name="q" bType="Quality" fc="ST" qchg="true"/>
+      <DA name="t" bType="Timestamp" fc="ST"/>
+    </DOType>
+    <DOType id="OC_LPL" cdc="LPL">
+      <DA name="vendor" bType="VisString255" fc="DC"/>
+      <DA name="swRev" bType="VisString255" fc="DC"/>
+      <DA name="d" bType="VisString255" fc="DC"/>
+      <DA name="configRev" bType="VisString255" fc="DC"/>
+      <DA name="ldNs" bType="VisString255" fc="EX"/>
+    </DOType>
+    <DOType id="OC_DPL" cdc="DPL">
+      <DA name="vendor" bType="VisString255" fc="DC"/>
+      <DA name="model" bType="VisString255" fc="DC"/>
+    </DOType>
+    <DOType id="OC_SPS" cdc="SPS">
+      <DA name="stVal" bType="BOOLEAN" fc="ST" dchg="true"/>
+      <DA name="q" bType="Quality" fc="ST" qchg="true"/>
+      <DA name="t" bType="Timestamp" fc="ST"/>
+    </DOType>
+    <DOType id="OC_SPC" cdc="SPC">
+      <DA name="stVal" bType="BOOLEAN" fc="ST" dchg="true"/>
+      <DA name="q" bType="Quality" fc="ST" qchg="true"/>
+      <DA name="Oper" bType="Struct" type="OC_SPCOperate" fc="CO"/>
+      <DA name="t" bType="Timestamp" fc="ST"/>
+      <DA name="ctlModel" bType="Enum" type="ctlModel" fc="CF"/>
+    </DOType>
+    <DOType id="OC_MV" cdc="MV">
+      <DA name="mag" bType="Struct" type="OC_AnalogueValue" fc="MX" dchg="true"/>
+      <DA name="q" bType="Quality" fc="MX" qchg="true"/>
+      <DA name="t" bType="Timestamp" fc="MX"/>
+      <DA name="db" bType="INT32U" fc="CF"/>
+    </DOType>
+    <DAType id="OC_SPCOperate">
+      <BDA name="ctlVal" bType="BOOLEAN"/>
+      <BDA name="origin" bType="Struct" type="OC_Originator"/>
+      <BDA name="ctlNum" bType="INT8U"/>
+      <BDA name="T" bType="Timestamp"/>
+      <BDA name="Test" bType="BOOLEAN"/>
+      <BDA name="Check" bType="Check"/>
+    </DAType>
+    <DAType id="OC_Originator">
+      <BDA name="orCat" bType="Enum" type="orCategory"/>
+      <BDA name="orIdent" bType="Octet64"/>
+    </DAType>
+    <DAType id="OC_AnalogueValue">
+      <BDA name="i" bType="INT32"/>
+    </DAType>
+    <EnumType id="Mod">
+      <EnumVal ord="1">on</EnumVal>
+      <EnumVal ord="2">blocked</EnumVal>
+      <EnumVal ord="3">test</EnumVal>
+      <EnumVal ord="4">test/blocked</EnumVal>
+      <EnumVal ord="5">off</EnumVal>
+    </EnumType>
+    <EnumType id="Beh">
+      <EnumVal ord="1">on</EnumVal>
+      <EnumVal ord="2">blocked</EnumVal>
+      <EnumVal ord="3">test</EnumVal>
+      <EnumVal ord="4">test/blocked</EnumVal>
+      <EnumVal ord="5">off</EnumVal>
+    </EnumType>
+    <EnumType id="Health">
+      <EnumVal ord="1">Ok</EnumVal>
+      <EnumVal ord="2">Warning</EnumVal>
+      <EnumVal ord="3">Alarm</EnumVal>
+    </EnumType>
+    <EnumType id="ctlModel">
+      <EnumVal ord="0">status-only</EnumVal>
+      <EnumVal ord="1">direct-with-normal-security</EnumVal>
+      <EnumVal ord="2">sbo-with-normal-security</EnumVal>
+      <EnumVal ord="3">direct-with-enhanced-security</EnumVal>
+      <EnumVal ord="4">sbo-with-enhanced-security</EnumVal>
+    </EnumType>
+    <EnumType id="orCategory">
+      <EnumVal ord="0">not-supported</EnumVal>
+      <EnumVal ord="1">bay-control</EnumVal>
+      <EnumVal ord="2">station-control</EnumVal>
+      <EnumVal ord="3">remote-control</EnumVal>
+      <EnumVal ord="4">automatic-bay</EnumVal>
+      <EnumVal ord="5">automatic-station</EnumVal>
+      <EnumVal ord="6">automatic-remote</EnumVal>
+      <EnumVal ord="7">maintenance</EnumVal>
+      <EnumVal ord="8">process</EnumVal>
+    </EnumType>
+  </DataTypeTemplates>
+</SCL>

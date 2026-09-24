@@ -1,0 +1,533 @@
+# Control results: AddCause values and LastApplError.Error values.
+# Format: see the header of data/hints.yaml.
+#
+# A failed control usually reports two things: an Error value (LastApplError.Error, domain
+# "ctl-error") saying which kind of test failed, and an AddCause (domain "add-cause") giving the
+# reason. The AddCause is almost always the more useful of the two.
+
+version: 1
+entries:
+
+# -----------------------------------------------------------------------------------------------------
+# LastApplError.Error
+# -----------------------------------------------------------------------------------------------------
+- id: ctl-error.unknown
+  keys: [ctl-error:unknown]
+  title: Control failed (unclassified)
+  summary: The device reported a failed control without classifying which test failed.
+  details: |
+    Look at the AddCause that came with it; that normally carries the actual reason.
+  next_checks:
+    - "Run `explain` on the AddCause shown with this error"
+    - "Read `Loc`, `LocSta`, `Mod`, `Beh` and `Health` of the object's logical node"
+  related: [control.lastapplerror, control.addcause]
+  hint: "the AddCause shown with it, which normally gives the reason; the device did not classify the failure"
+  certainty: check
+
+- id: ctl-error.timeout-test-not-ok
+  keys: [ctl-error:timeout-test-not-ok]
+  title: A time-supervised test failed
+  summary: >-
+    A check that the device supervises over time did not succeed before its time ran out, for
+    example waiting for a synchrocheck release or for the switch to reach its end position.
+  next_checks:
+    - "Run `explain` on the AddCause shown with this error"
+    - "Read `stVal` of the object to see where it ended up"
+  related: [add-cause:time-limit-over, add-cause:blocked-by-synchrocheck, control.lastapplerror]
+  hint: "A check supervised over time failed (e.g. synchrocheck release or end position not reached in time); see the AddCause"
+  certainty: likely
+
+- id: ctl-error.operator-test-not-ok
+  keys: [ctl-error:operator-test-not-ok]
+  title: A pre-execution test failed
+  summary: >-
+    One of the device's checks before executing the command failed: switching hierarchy
+    (local/remote), mode, interlocking, synchrocheck, or the process state.
+  next_checks:
+    - "Run `explain` on the AddCause shown with this error"
+    - "Read `Loc`/`LocSta`, `Mod`/`Beh`, and the interlocking LN (`CILO`)"
+  related: [control.addcause, concept.switching-hierarchy, control.interlocking, control.lastapplerror]
+  hint: "One of the device's pre-execution checks failed (authority, mode, interlocking, synchrocheck or process); the AddCause says which"
+  certainty: likely
+
+# -----------------------------------------------------------------------------------------------------
+# AddCause
+# -----------------------------------------------------------------------------------------------------
+- id: add-cause.unknown
+  keys: [add-cause:unknown]
+  title: "AddCause: unknown"
+  summary: The device refused or aborted the command without giving a reason.
+  details: |
+    Without a reason, work through the usual suspects in this order: control authority
+    (`Loc`/`LocSta`), mode (`Mod`/`Beh`), health, interlocking, and the process state of the
+    switchgear.
+  next_checks:
+    - "Read `Loc`, `LocSta` and `LocKey`, then run `authority-probe <object>`"
+    - "Read `Mod`, `Beh` and `Health` of the logical node and of LLN0"
+    - "Read the interlocking LN (`CILO*.EnaOpn` / `EnaCls`)"
+  related: [control.addcause, concept.switching-hierarchy, control.mod, control.interlocking]
+  hint: "`Loc`/`LocSta`, `Mod`/`Beh`, `Health` and interlocking (`CILO`), and run `authority-probe`; the device gave no reason"
+  certainty: check
+
+- id: add-cause.not-supported
+  keys: [add-cause:not-supported]
+  title: "AddCause: not supported"
+  summary: >-
+    The device does not support what was asked: this control service, this value, or an option
+    such as the Test flag.
+  next_checks:
+    - "Read `ctlModel` to see which control sequence the device expects"
+    - "Try without the Test flag, or with a different ctlVal"
+  related: [control.ctlmodel, control.test]
+  hint: "The device does not support this command, value or option (e.g. the Test flag); read `ctlModel` and check the device documentation"
+  certainty: likely
+
+- id: add-cause.blocked-by-switching-hierarchy
+  keys: [add-cause:blocked-by-switching-hierarchy]
+  title: "AddCause: blocked by switching hierarchy"
+  summary: >-
+    The local/remote settings of the device do not allow commands from this level (the command's
+    orCat) at the moment.
+  details: |
+    A substation has several places a command can come from: the switchgear itself, the bay
+    (e.g. the BCU front panel), the station HMI or gateway, and the remote control centre. The
+    device only accepts commands from the level that currently has authority. In typical
+    implementations:
+    - `Loc` true (bay or device in local, often set by a key switch or the front panel): station and
+      remote commands are refused
+    - `LocSta` true (Ed2; station level has authority): remote-control commands are refused, and
+      station-control commands are accepted
+    - `LocSta` false: remote-control commands are accepted, and some devices refuse station-control
+
+    Vendors differ in the details, and the key position may be reported in `LocKey`. The orCat the
+    tool sends is chosen per command (bay, station or remote); it should be the one the real client
+    sends.
+  next_checks:
+    - "Read `Loc`, `LocSta` and `LocKey` on the control LN (e.g. CSWI) and on LLN0"
+    - "Run `authority-probe <object>` to see which orCat values are accepted"
+    - "Resend with the orCat the real client uses (`set orcat …` or `--orcat`)"
+  related: [concept.switching-hierarchy, control.loc, control.locsta, control.lockey, control.orcat]
+  hint: "Loc/LocSta settings do not allow this orCat right now; read `Loc`/`LocSta`/`LocKey` and run `authority-probe`"
+  certainty: likely
+
+- id: add-cause.blocked-by-switching-hierarchy.remote
+  keys: [add-cause:blocked-by-switching-hierarchy]
+  when: {tags: {or_cat: [remote-control, automatic-remote]}}
+  hint: "Remote commands are refused when the bay is in local (`Loc`) or when station level has authority (`LocSta` true); read both"
+  certainty: likely
+
+- id: add-cause.blocked-by-switching-hierarchy.station
+  keys: [add-cause:blocked-by-switching-hierarchy]
+  when: {tags: {or_cat: [station-control, automatic-station]}}
+  hint: "Station commands are refused when the bay is in local (`Loc`), and on some devices when `LocSta` is false (remote has authority); read both"
+  certainty: likely
+
+- id: add-cause.blocked-by-switching-hierarchy.bay
+  keys: [add-cause:blocked-by-switching-hierarchy]
+  when: {tags: {or_cat: [bay-control, automatic-bay]}}
+  hint: "Many devices accept bay-level commands only while the bay is in local (`Loc` true); read `Loc` and try the orCat the real client uses"
+  certainty: likely
+
+- id: add-cause.select-failed
+  keys: [add-cause:select-failed]
+  title: "AddCause: select failed"
+  summary: The select step was refused, so the object could not be reserved for the operate.
+  details: |
+    Typical reasons are another client holding the selection, the object being blocked, or the
+    command's origin not having authority. The device may report a more precise reason in a later
+    LastApplError.
+  next_checks:
+    - "Run `authority-probe <object>` to see which orCat values can select"
+    - "Wait for any other client's selection to time out, then retry"
+  related: [control.sbo, control.sbow, add-cause:object-already-selected]
+  hint: "The select was refused (already selected elsewhere, blocked, or no authority for this orCat); run `authority-probe <object>`"
+  certainty: likely
+
+- id: add-cause.select-failed.sbo-normal
+  keys: [add-cause:select-failed]
+  when: {service: select, ctl_model: sbo-with-normal-security}
+  title: "Select refused (normal security, no reason given)"
+  summary: >-
+    With normal security, a select is a read of the SBO attribute, and the device refuses by
+    returning an empty value. That answer carries no reason, so the tool reports it as select-failed.
+  details: |
+    The device does not say why. The usual reasons are the same as for any refused control: the
+    orCat is not allowed by the local/remote settings, another client holds the selection, the
+    logical node's behaviour is off/blocked/test, or the function reports a health alarm.
+  next_checks:
+    - "Run `authority-probe <object>` to see which orCat values can select"
+    - "Read `Loc`, `LocSta`, `stSeld` and `Beh` on the object's logical node"
+    - "Wait for any other client's selection to time out, then retry"
+  related: [control.sbo, concept.switching-hierarchy, control.stseld, control.beh]
+  hint: "`Loc`/`LocSta`, `stSeld` and `Beh`, and run `authority-probe`; the device refused the select with an empty answer, which carries no reason"
+  certainty: check
+
+- id: add-cause.invalid-position
+  keys: [add-cause:invalid-position]
+  title: "AddCause: invalid position"
+  summary: >-
+    The switch reports an intermediate or faulty position, so the device will not operate it.
+  details: |
+    A double-point position has four states: intermediate (00), off/open (01), on/closed (10) and
+    bad (11). Devices refuse to operate from intermediate or bad, which usually points to a drive
+    stuck mid-travel or a problem with the auxiliary contacts or their wiring (or, on a test rack, a
+    simulator not driving both contacts).
+  next_checks:
+    - "Read `Pos.stVal` and `Pos.q` of the switch (CSWI and XCBR/XSWI)"
+    - "Check the auxiliary contact inputs or the switchgear simulator"
+  related: [cdc.dps, ln.xcbr, ln.xswi]
+  hint: "The switch reports an intermediate or bad position; read `Pos.stVal` and check the auxiliary contacts or simulator"
+  certainty: likely
+
+- id: add-cause.position-reached
+  keys: [add-cause:position-reached]
+  title: "AddCause: position reached"
+  summary: The object was already in the requested position, so there was nothing to do.
+  details: |
+    This is not a fault. It often shows up when a test repeats a command, or when the displayed
+    state was out of date.
+  next_checks:
+    - "Read `Pos.stVal` to confirm the current position"
+  related: [cdc.dpc, control.stval]
+  hint: "The object was already in the requested position; read `Pos.stVal` to confirm"
+  certainty: likely
+
+- id: add-cause.parameter-change-in-execution
+  keys: [add-cause:parameter-change-in-execution]
+  title: "AddCause: parameter change in execution"
+  summary: A parameter the command depends on changed while the command was executing.
+  details: |
+    For example a setting or the active setting group changed during execution.
+  next_checks:
+    - "Check for a setting or setting-group change at the same time, then retry"
+  related: [sgcb.actsg]
+  hint: "A parameter changed while the command was running (e.g. setting group change); retry once things are stable"
+  certainty: likely
+
+- id: add-cause.step-limit
+  keys: [add-cause:step-limit]
+  title: "AddCause: step limit"
+  summary: The step position is already at its upper or lower limit.
+  details: |
+    Mostly seen with tap changers and other step controls: a raise at the highest step, or a lower
+    at the lowest, is refused.
+  next_checks:
+    - "Read the current step position (`stVal` / `ValWTr`)"
+  related: [cdc.bsc, cdc.isc, ln.yltc]
+  hint: "The step position is at its limit (e.g. highest or lowest tap); read the current position"
+  certainty: likely
+
+- id: add-cause.blocked-by-mode
+  keys: [add-cause:blocked-by-mode]
+  title: "AddCause: blocked by mode"
+  summary: >-
+    The logical node (or its logical device) is in a mode that does not accept this command:
+    off, blocked or test, or the command's Test flag does not match the mode.
+  details: |
+    Each logical node has a mode (`Mod`) and an effective behaviour (`Beh`) that also takes the
+    logical device's mode into account. A node that is off does not accept commands. In test
+    mode, devices accept commands marked as test and refuse ordinary ones; in normal operation
+    they refuse commands marked as test. Exact handling of the Test flag varies by edition and
+    vendor.
+  next_checks:
+    - "Read `Beh` and `Mod` of the logical node and of LLN0"
+    - "Check whether the Test flag was set on this command"
+  related: [control.mod, control.beh, control.test]
+  hint: "Mod/Beh (or the Test flag) does not allow this command; read `Beh` and `Mod` on the LN and LLN0"
+  certainty: likely
+
+- id: add-cause.blocked-by-mode.test
+  keys: [add-cause:blocked-by-mode]
+  when: {tags: {test: "yes"}}
+  hint: "The command carried the Test flag, but the device is not in a mode that accepts test commands; read `Beh` (should be test or test-blocked)"
+  certainty: likely
+
+- id: add-cause.blocked-by-mode.normal
+  keys: [add-cause:blocked-by-mode]
+  when: {tags: {test: "no"}}
+  hint: "The device or this LN is off or in test and refuses ordinary commands; read `Mod`/`Beh`, or resend with the Test flag if a test is intended"
+  certainty: likely
+
+- id: add-cause.blocked-by-process
+  keys: [add-cause:blocked-by-process]
+  title: "AddCause: blocked by process"
+  summary: >-
+    A condition in the primary equipment or its drive blocks the operation, for example a breaker
+    spring not charged, low gas pressure, or a blocking input.
+  details: |
+    The device looked at the switchgear's state and decided it cannot operate safely. On a test
+    rack this is often a missing or wrong simulator input.
+  next_checks:
+    - "Check the device's alarm list"
+    - "Read `XCBR.CBOpCap`, `BlkOpn`/`BlkCls` and any gas monitoring (SIMG) the device models"
+  related: [ln.xcbr, ln.simg]
+  hint: "A process condition blocks it (spring not charged, low gas pressure, blocking input); check alarms and `XCBR` `BlkOpn`/`BlkCls`/`CBOpCap`"
+  certainty: likely
+
+- id: add-cause.blocked-by-interlocking
+  keys: [add-cause:blocked-by-interlocking]
+  title: "AddCause: blocked by interlocking"
+  summary: The interlocking logic does not permit this operation in the current switchgear state.
+  details: |
+    Interlocking prevents unsafe switching, for example operating a disconnector under load. The
+    interlocking logical node (CILO) publishes whether opening and closing are currently allowed.
+    Its inputs often come from other devices over GOOSE, which this tool cannot see: a missing
+    GOOSE message can leave interlocking blocked even though the switchgear is in the right state.
+  next_checks:
+    - "Read `CILO*.EnaOpn` and `CILO*.EnaCls`"
+    - "Check the positions of the switches the interlock depends on"
+    - "If the interlock inputs come over GOOSE, read LGOS (if present) or use Wireshark to see whether they arrive"
+  related: [control.interlocking, ln.cilo, scope.goose, ln.lgos, control.check]
+  hint: "Interlocking does not allow this now; read `CILO*.EnaOpn`/`EnaCls` (its inputs may come over GOOSE, which this tool cannot see)"
+  certainty: likely
+
+- id: add-cause.blocked-by-interlocking.expert
+  keys: [add-cause:blocked-by-interlocking]
+  when: {mode: expert}
+  hint: "Interlocking does not allow this now; read `CILO*.EnaOpn`/`EnaCls`. In expert mode the interlock check flag can be cleared for negative testing (logged)"
+  certainty: likely
+
+- id: add-cause.blocked-by-synchrocheck
+  keys: [add-cause:blocked-by-synchrocheck]
+  title: "AddCause: blocked by synchrocheck"
+  summary: >-
+    The synchrocheck did not release the close, because voltage, frequency or angle differences are
+    outside their limits, or a reference voltage is missing.
+  details: |
+    Synchrocheck applies to closing a breaker between two parts of the network. On an isolated test
+    rack the voltage inputs are often missing or not simulated, which keeps synchrocheck from
+    releasing. Some devices also allow a "dead line / dead bus" close that must be enabled in the
+    settings.
+  next_checks:
+    - "Read the synchrocheck LN (`CSYN` or `RSYN`) release and measured differences"
+    - "Check the voltage inputs (or the test set feeding them)"
+  related: [control.synchrocheck, ln.csyn, control.check]
+  hint: "Synchrocheck did not release the close (voltage, frequency or angle difference, or missing voltage); read the `CSYN`/`RSYN` values"
+  certainty: likely
+
+- id: add-cause.blocked-by-synchrocheck.expert
+  keys: [add-cause:blocked-by-synchrocheck]
+  when: {mode: expert}
+  hint: "Synchrocheck did not release the close; read `CSYN`/`RSYN`. In expert mode the synchrocheck flag can be cleared for negative testing (logged)"
+  certainty: likely
+
+- id: add-cause.command-already-in-execution
+  keys: [add-cause:command-already-in-execution]
+  title: "AddCause: command already in execution"
+  summary: The object is still executing an earlier command.
+  details: |
+    For example a breaker or disconnector still travelling, or a tap change in progress. The new
+    command is refused until the earlier one finishes.
+  next_checks:
+    - "Wait for the earlier command to finish, then read `stVal`"
+    - "Read the last command's `origin` and `ctlNum` to see who sent it"
+  related: [control.origin, control.ctlnum]
+  hint: "The object is still executing an earlier command; wait for it to finish and read `stVal` and the last `origin`"
+  certainty: likely
+
+- id: add-cause.blocked-by-health
+  keys: [add-cause:blocked-by-health]
+  title: "AddCause: blocked by health"
+  summary: The function or its device reports a health alarm, so it refuses commands.
+  next_checks:
+    - "Read `Health` of the logical node, of LLN0 and `LPHD1.PhyHealth`"
+    - "Check the device's self-supervision alarms"
+  related: [control.health, ln.lphd]
+  hint: "The function or device reports Health=alarm and refuses commands; read `Health` and `LPHD1.PhyHealth`"
+  certainty: likely
+
+- id: add-cause.1-of-n-control
+  keys: [add-cause:1-of-n-control]
+  title: "AddCause: 1-of-n control"
+  summary: >-
+    Another control operation in the same bay or station is in progress, and only one is allowed
+    at a time.
+  next_checks:
+    - "Wait for the other operation to finish, then retry"
+    - "Check whether another client is selecting or operating objects in the same bay"
+  related: [add-cause:object-already-selected]
+  hint: "Another switching operation in the same bay or station is in progress (one at a time); wait and retry"
+  certainty: likely
+
+- id: add-cause.abortion-by-cancel
+  keys: [add-cause:abortion-by-cancel]
+  title: "AddCause: aborted by cancel"
+  summary: The command was stopped because a cancel was received.
+  details: |
+    The cancel may have come from this tool (`cancel`) or from another client.
+  next_checks:
+    - "Check the session log for a cancel sent by this tool"
+    - "Read the object's `origin` to see who acted last"
+  related: [control.cancel]
+  hint: "The command was aborted by a cancel (from this tool or another client); check the log and the object's `origin`"
+  certainty: likely
+
+- id: add-cause.time-limit-over
+  keys: [add-cause:time-limit-over]
+  title: "AddCause: time limit over"
+  summary: >-
+    A time limit expired: either the selection timed out before the operate arrived, or the
+    equipment did not reach its new state within the allowed execution time.
+  details: |
+    The selection limit is the object's `sboTimeout`. The execution limit is set in the device (for
+    breakers and disconnectors, their maximum travel time). On a test rack a simulator that never
+    changes the position feedback also ends like this.
+  next_checks:
+    - "Read `sboTimeout` and compare with the time between select and operate (shown per step)"
+    - "Read `Pos.stVal` to see whether the equipment moved"
+  related: [control.sbotimeout, control.commandtermination, tool:select-timeout-expired]
+  hint: "A time limit expired: the selection timed out (`sboTimeout`) or the equipment did not reach its position in time"
+  certainty: likely
+
+- id: add-cause.time-limit-over.operate
+  keys: [add-cause:time-limit-over]
+  when: {service: operate, ctl_model: [sbo-with-normal-security, sbo-with-enhanced-security]}
+  hint: "The selection expired before the operate arrived (`sboTimeout`); operate sooner after the select"
+  certainty: likely
+
+- id: add-cause.time-limit-over.termination
+  keys: [add-cause:time-limit-over]
+  when: {service: command-termination}
+  hint: "The equipment did not reach its new position within the execution time; check the drive, the position feedback (or simulator) and `Pos.stVal`"
+  certainty: likely
+
+- id: add-cause.abortion-by-trip
+  keys: [add-cause:abortion-by-trip]
+  title: "AddCause: aborted by trip"
+  summary: A protection trip occurred during the command and aborted it.
+  next_checks:
+    - "Read the trip indications (`PTRC*.Tr`, protection `Op`) and the event list"
+  related: [ln.ptrc]
+  hint: "A protection trip aborted the command; read `PTRC*.Tr` and the protection `Op` indications"
+  certainty: likely
+
+- id: add-cause.object-not-selected
+  keys: [add-cause:object-not-selected]
+  title: "AddCause: object not selected"
+  summary: >-
+    An operate or cancel arrived for an object that is not currently selected by this client.
+  details: |
+    With select-before-operate, the selection lasts only `sboTimeout`. It also ends when it is
+    cancelled, when the association is lost, or when the device restarts.
+  next_checks:
+    - "Select again and operate within `sboTimeout`"
+    - "Check the step timings the tool printed"
+  related: [control.sbo, control.sbotimeout, tool:select-timeout-expired]
+  hint: "No valid selection: the select was not made, expired (`sboTimeout`) or was cancelled; select again and operate promptly"
+  certainty: likely
+
+- id: add-cause.object-already-selected
+  keys: [add-cause:object-already-selected]
+  title: "AddCause: object already selected"
+  summary: Another client, or an earlier select by this tool, already holds the selection.
+  next_checks:
+    - "`cancel` your own earlier selection, or wait for the other client's `sboTimeout`"
+    - "Read `stSeld` (if present) to see whether the object is selected"
+  related: [control.sbo, control.stseld, add-cause:locked-by-other-client]
+  hint: "The object is already selected (by another client or an earlier select); `cancel` yours or wait for `sboTimeout`"
+  certainty: likely
+
+- id: add-cause.no-access-authority
+  keys: [add-cause:no-access-authority]
+  title: "AddCause: no access authority"
+  summary: This client or this orCat has no authority to control the object.
+  details: |
+    Depending on the device this comes from the switching hierarchy (local/remote settings), from
+    per-client access rights, or from the orCat value itself.
+  next_checks:
+    - "Run `authority-probe <object>`"
+    - "Read `Loc`, `LocSta` and `LocKey`"
+    - "Try as the real client with `--as <client>` and its orCat"
+  related: [concept.switching-hierarchy, control.orcat, add-cause:blocked-by-switching-hierarchy]
+  hint: "This client or orCat has no control authority; run `authority-probe` and check `Loc`/`LocSta` and `--as <client>`"
+  certainty: likely
+
+- id: add-cause.ended-with-overshoot
+  keys: [add-cause:ended-with-overshoot]
+  title: "AddCause: ended with overshoot"
+  summary: The controlled value went past its target.
+  details: |
+    Seen with setpoint and step controls (analogue setpoints, tap changers).
+  next_checks:
+    - "Read the resulting value and check the equipment or its simulation"
+  related: [cdc.apc, cdc.bsc]
+  hint: "The controlled value overshot its target; read the resulting value and check the equipment"
+  certainty: likely
+
+- id: add-cause.abortion-due-to-deviation
+  keys: [add-cause:abortion-due-to-deviation]
+  title: "AddCause: aborted due to deviation"
+  summary: >-
+    Execution was aborted because the process did not behave as expected, for example unexpected
+    position feedback.
+  next_checks:
+    - "Read `Pos.stVal`/`Pos.q` and check the feedback wiring or simulator"
+  related: [add-cause:invalid-position]
+  hint: "Execution was aborted because the feedback did not behave as expected; check `Pos.stVal` and the feedback wiring or simulator"
+  certainty: likely
+
+- id: add-cause.abortion-by-communication-loss
+  keys: [add-cause:abortion-by-communication-loss]
+  title: "AddCause: aborted by communication loss"
+  summary: Execution was aborted because a communication link was lost during the command.
+  details: |
+    The lost link may be one this tool cannot see, for example between the bay controller and the
+    switchgear I/O over GOOSE or a process bus.
+  next_checks:
+    - "Check the device's communication supervision (e.g. `LGOS`, `LCCH`) if it has it"
+    - "Use Wireshark on the station bus to see whether the expected GOOSE messages arrive"
+  related: [scope.goose, ln.lgos, ln.lcch]
+  hint: "A communication link was lost during execution, possibly one invisible to this tool (GOOSE or process bus); check `LGOS`/`LCCH`"
+  certainty: likely
+
+- id: add-cause.abortion-by-command
+  keys: [add-cause:abortion-by-command]
+  title: "AddCause: aborted by command"
+  summary: Another command aborted this one.
+  next_checks:
+    - "Read the object's `origin` and `ctlNum` to see the later command"
+  related: [control.origin]
+  hint: "A later command aborted this one; read the object's `origin` and `ctlNum`"
+  certainty: likely
+
+- id: add-cause.none
+  keys: [add-cause:none]
+  title: "AddCause: none"
+  summary: The device gave no additional cause.
+  details: |
+    If the command succeeded, there is nothing to explain. If it failed, the device did not say why;
+    treat it like an unknown cause.
+  next_checks:
+    - "Read `stVal` to see whether the command took effect"
+    - "If it failed, check `Loc`/`LocSta`, `Mod`/`Beh`, `Health` and interlocking"
+  related: [add-cause:unknown]
+  hint: "`stVal`, and if the command failed, authority, mode and interlocking; the device gave no additional cause"
+  certainty: check
+
+- id: add-cause.inconsistent-parameters
+  keys: [add-cause:inconsistent-parameters]
+  title: "AddCause: inconsistent parameters"
+  summary: >-
+    The operate did not carry the same parameters as the select (control value, origin, control
+    number, Test or check flags).
+  details: |
+    With select-before-operate the device compares the operate with what was selected. The tool
+    keeps them identical, so this points either to a device quirk or to another client's command
+    interleaving with ours.
+  next_checks:
+    - "Retry the whole select/operate sequence"
+    - "If it repeats, capture it and record a device quirk"
+  related: [control.sbow, control.oper, control.ctlnum]
+  hint: "The operate differed from the select (ctlVal, origin, ctlNum, Test or Check); retry the whole sequence and record it if it repeats"
+  certainty: likely
+
+- id: add-cause.locked-by-other-client
+  keys: [add-cause:locked-by-other-client]
+  title: "AddCause: locked by another client"
+  summary: Another client holds a lock on the object, for example through a selection.
+  next_checks:
+    - "Read the object's `origin` to see which client acted last"
+    - "Wait for the other client's selection to time out"
+  related: [add-cause:object-already-selected, control.origin]
+  hint: "Another client holds this object (e.g. a selection); read its `origin` and wait for the lock to expire"
+  certainty: likely

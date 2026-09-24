@@ -1,0 +1,370 @@
+# Glossary: reports (RCB concepts, RCB attributes, trigger options, optional fields) and setting
+# groups (SGCB attributes).
+# Format: see the header of data/hints.yaml.
+#
+# Several OptFlds bits share a name with an RCB attribute (e.g. BufOvfl, EntryID, ConfRev, DatSet,
+# SqNum); one entry explains both.
+
+version: 1
+entries:
+
+# -----------------------------------------------------------------------------------------------------
+# Report control blocks
+# -----------------------------------------------------------------------------------------------------
+- id: concept.rcb
+  kind: concept
+  terms: [RCB, report control block, report, reports, reporting]
+  title: Report control block (RCB)
+  summary: >-
+    An object on the device that sends a client the values of a dataset whenever they change (and on
+    other triggers), instead of the client polling.
+  details: |
+    There are two kinds: buffered (BRCB, FC=BR), which keeps events while its client is away, and
+    unbuffered (URCB, FC=RP), which does not. One RCB serves one client at a time, so devices provide
+    several numbered instances of each block, and the SCD usually assigns instances to clients.
+
+    A client enables a block by writing `RptEna` true, usually after setting trigger options and
+    optional fields. This tool can inspect blocks (`rcb`), subscribe to free ones (`subscribe`) and,
+    in expert mode, take over one that another client uses.
+  next_checks:
+    - "Run `rcb` to list blocks with their dataset, state and owner"
+  related: [concept.brcb, concept.urcb, rcb.rptena, rcb.datset, rcb.trgops, concept.report-levels]
+
+- id: concept.brcb
+  kind: term
+  terms: [BRCB, buffered report control block, buffered report]
+  title: Buffered report control block (BRCB)
+  summary: >-
+    A report control block that keeps events in a buffer while its client is disconnected and sends
+    them when the client comes back, so no events are lost (within the buffer's size).
+  details: |
+    The client resumes from where it stopped by writing the last `EntryID` it received. If the
+    buffer fills up, the oldest events are dropped and `BufOvfl` is set. In Ed2 a BRCB stays reserved
+    for its client for `ResvTms` seconds after the client leaves.
+  related: [concept.rcb, rcb.entryid, rcb.bufovfl, rcb.resvtms, rcb.purgebuf, fc.br]
+
+- id: concept.urcb
+  kind: term
+  terms: [URCB, unbuffered report control block, unbuffered report]
+  title: Unbuffered report control block (URCB)
+  summary: >-
+    A report control block that only sends while its client is connected; events that happen while
+    the client is away are not kept.
+  details: |
+    A client reserves a URCB by writing `Resv` true, or implicitly by enabling it.
+  related: [concept.rcb, rcb.resv, fc.rp]
+
+- id: concept.report-levels
+  kind: concept
+  terms: [subscribe, takeover, RCB takeover, report subscription]
+  title: Inspect, subscribe, take over
+  summary: >-
+    The three levels of report use in this tool: inspect (read RCB attributes, no effect), subscribe
+    (enable a free block) and take over (enable a block another client uses; expert mode only).
+  details: |
+    A takeover disrupts the client that loses the block, which may be a real gateway, so it needs
+    expert mode, `--takeover` and typed confirmation, and the warning names that client. On exit the
+    tool disables what it enabled and restores what it changed; anything it cannot undo (such as a
+    lingering `ResvTms`) is reported.
+
+    Recommended rack practice: give a test client its own RCB instances in each experiment's SCD.
+  related: [concept.rcb, tool:rcb-no-free-instance, tool:takeover-requires-expert, tool:rcb-cleanup-incomplete]
+
+- id: rcb.rptid
+  kind: term
+  terms: [RptID, report ID]
+  title: RptID (report identifier)
+  summary: >-
+    A name carried in every report so the client can tell which block it came from. If empty, the
+    block's own reference is used.
+  related: [concept.rcb]
+
+- id: rcb.rptena
+  kind: term
+  terms: [RptEna, report enable]
+  title: RptEna (report enable)
+  summary: >-
+    Writing true starts reporting to the client that wrote it; writing false stops it. While enabled,
+    most other attributes of the block cannot be changed.
+  details: |
+    If another client already has the block enabled or reserved, enabling it fails, typically with
+    "temporarily unavailable" or "access denied". `rcb` shows who holds it.
+  related: [concept.rcb, rcb.owner, data-access:temporarily-unavailable]
+
+- id: rcb.resv
+  kind: term
+  terms: [Resv, reserve, reservation]
+  title: Resv (URCB reservation)
+  summary: >-
+    On an unbuffered block, true means a client has reserved it, so no other client can use it.
+    The reservation ends with that client's association.
+  related: [concept.urcb, rcb.resvtms, rcb.owner]
+
+- id: rcb.resvtms
+  kind: term
+  terms: [ResvTms, reservation time]
+  title: ResvTms (BRCB reservation time, Ed2)
+  summary: >-
+    On a buffered block, how long (in seconds) the block stays reserved for its client after that
+    client's association ends, so it can reconnect without losing events.
+  details: |
+    While the time runs, other clients cannot enable the block, including this tool after it has
+    used the block. On many devices a negative value means the block is reserved by configuration
+    for a particular client. Ed1 blocks do not have it.
+  related: [concept.brcb, rcb.owner, tool:rcb-cleanup-incomplete]
+
+- id: rcb.owner
+  kind: term
+  terms: [Owner]
+  title: Owner (Ed2)
+  summary: >-
+    Identifies the client that currently has the block enabled or reserved, typically by its IP
+    address. `rcb` shows it and names the inventory client when it can.
+  details: |
+    An empty or zero Owner means nobody holds the block. Ed1 blocks do not have it.
+  related: [rcb.rptena, rcb.resv, rcb.resvtms, check:rcb-enabled-by-unknown-client]
+
+- id: rcb.datset
+  kind: term
+  terms: [DatSet, OptFlds.dataSet]
+  title: DatSet (dataset of the block)
+  summary: >-
+    The reference of the dataset whose members the block reports. As an optional field (dataSet),
+    it also makes each report carry that name.
+  related: [concept.dataset, check:rcb-dataset-missing, rcb.confrev]
+
+- id: rcb.confrev
+  kind: term
+  terms: [ConfRev, configuration revision, OptFlds.confRev]
+  title: ConfRev (configuration revision)
+  summary: >-
+    A number that changes whenever the configuration behind the block (its dataset or the block
+    itself) changes. As an optional field (confRev) it is carried in each report.
+  details: |
+    Clients compare it with the value they were configured with. A mismatch means the device and
+    the client's expectation (usually the SCD) have diverged, and a careful client will not trust
+    the reports. Not to be confused with `configRev` in `NamPlt`, which describes the logical
+    device's configuration as a whole.
+  related: [check:confrev-mismatch, concept.dataset, rcb.datset]
+
+- id: rcb.optflds
+  kind: term
+  terms: [OptFlds, optional fields]
+  title: OptFlds (optional fields)
+  summary: >-
+    Bits choosing which optional fields each report contains: sequence number, report time stamp,
+    reason for inclusion, dataset name, data references, buffer overflow, entry ID and configuration
+    revision.
+  details: |
+    Clients usually set these before enabling. Leaving out the reason or the sequence number makes
+    reports harder to interpret. The segmentation bit is handled by the protocol library and not
+    shown.
+  related: [rcb.sqnum, optflds.timestamp, optflds.reasoncode, rcb.datset, optflds.dataref, rcb.bufovfl, rcb.entryid, rcb.confrev]
+
+- id: rcb.buftm
+  kind: term
+  terms: [BufTm, buffer time]
+  title: BufTm (buffer time)
+  summary: >-
+    How long (in milliseconds) the device waits after a first change to collect further changes into
+    the same report. 0 sends each change at once.
+  related: [concept.rcb, rcb.trgops]
+
+- id: rcb.sqnum
+  kind: term
+  terms: [SqNum, seqNum, sequence number, OptFlds.seqNum]
+  title: SqNum (sequence number)
+  summary: >-
+    A counter that goes up by one with each report. With the seqNum optional field set, each report
+    carries it, so the client can spot missing reports.
+  details: |
+    `subscribe` flags gaps in the sequence.
+  related: [rcb.optflds, concept.rcb]
+
+- id: rcb.trgops
+  kind: term
+  terms: [TrgOps, trigger options, triggers]
+  title: TrgOps (trigger options)
+  summary: >-
+    Bits choosing what makes the block send a report: data change (dchg), quality change (qchg),
+    data update (dupd), the integrity period (period) and general interrogation (gi).
+  details: |
+    Clients usually set these before enabling. Without the gi bit, a general interrogation request
+    does nothing; without period, `IntgPd` has no effect.
+  related: [trgops.dchg, trgops.qchg, trgops.dupd, trgops.period, rcb.gi, rcb.intgpd]
+
+- id: trgops.dchg
+  kind: term
+  terms: [dchg, data change, TrgOps.dchg]
+  title: "Trigger: data change (dchg)"
+  summary: Send a report when a member's value changes.
+  related: [rcb.trgops]
+
+- id: trgops.qchg
+  kind: term
+  terms: [qchg, quality change, TrgOps.qchg]
+  title: "Trigger: quality change (qchg)"
+  summary: Send a report when a member's quality changes.
+  related: [rcb.trgops, concept.quality]
+
+- id: trgops.dupd
+  kind: term
+  terms: [dupd, data update, TrgOps.dupd]
+  title: "Trigger: data update (dupd)"
+  summary: >-
+    Send a report when a member is refreshed, even if its value stays the same (useful for counters
+    and frozen values).
+  related: [rcb.trgops]
+
+- id: trgops.period
+  kind: term
+  terms: [period, TrgOps.period, integrity trigger]
+  title: "Trigger: integrity period (period)"
+  summary: >-
+    Send all dataset members every `IntgPd` milliseconds, whether they changed or not.
+  related: [rcb.trgops, rcb.intgpd]
+
+- id: rcb.intgpd
+  kind: term
+  terms: [IntgPd, integrity period]
+  title: IntgPd (integrity period)
+  summary: >-
+    The interval in milliseconds for integrity reports, which carry every dataset member. Only used
+    when the period trigger is set; 0 means none.
+  related: [trgops.period, rcb.trgops]
+
+- id: rcb.gi
+  kind: term
+  terms: [GI, general interrogation, TrgOps.gi]
+  title: GI (general interrogation)
+  summary: >-
+    A request for a report with the current value of every dataset member. As a trigger option (gi)
+    it allows the block to answer such requests.
+  details: |
+    A client writes `GI` true on a block it has enabled; the device sends the report and resets the
+    attribute. It only works on an enabled block with the gi trigger set. `gi` in this tool does
+    this on the subscribed block.
+  related: [rcb.trgops, rcb.rptena, data-access:temporarily-unavailable]
+
+- id: rcb.purgebuf
+  kind: term
+  terms: [PurgeBuf, purge buffer]
+  title: PurgeBuf (purge buffer)
+  summary: >-
+    Writing true on a buffered block discards the events it holds that were not yet sent.
+  related: [concept.brcb]
+
+- id: rcb.entryid
+  kind: term
+  terms: [EntryID, entry ID, OptFlds.entryID]
+  title: EntryID
+  summary: >-
+    The identifier of an entry in a buffered block's buffer. A reconnecting client writes the last
+    EntryID it received to resume after it. As an optional field (entryID) it is carried in reports.
+  related: [concept.brcb, rcb.timeofentry]
+
+- id: rcb.timeofentry
+  kind: term
+  terms: [TimeOfEntry, time of entry]
+  title: TimeOfEntry
+  summary: The time at which the buffered entry named by `EntryID` was created.
+  related: [rcb.entryid, concept.brcb]
+
+- id: rcb.bufovfl
+  kind: term
+  terms: [BufOvfl, buffer overflow, OptFlds.bufOvfl]
+  title: BufOvfl (buffer overflow)
+  summary: >-
+    Set on a buffered block when its buffer overflowed and old events were lost. As an optional
+    field (bufOvfl) it is carried in reports.
+  related: [concept.brcb, check:brcb-buffer-overflow]
+
+- id: optflds.timestamp
+  kind: term
+  terms: [OptFlds.timeStamp, report timestamp, report time stamp]
+  title: "Optional field: report time stamp"
+  summary: Each report carries the time at which it was created.
+  related: [rcb.optflds]
+
+- id: optflds.reasoncode
+  kind: term
+  terms: [reasonCode, reason code, reason for inclusion, ReasonForInclusion, OptFlds.reasonCode]
+  title: "Optional field: reason for inclusion"
+  summary: >-
+    Each value in a report comes with the reason it was included: data change, quality change, data
+    update, integrity or general interrogation.
+  related: [rcb.optflds, rcb.trgops]
+
+- id: optflds.dataref
+  kind: term
+  terms: [dataRef, data reference, OptFlds.dataRef]
+  title: "Optional field: data reference"
+  summary: Each value in a report comes with the reference of the member it belongs to.
+  related: [rcb.optflds]
+
+- id: optflds.segmentation
+  kind: term
+  terms: [segmentation, OptFlds.segmentation]
+  title: "Optional field: segmentation"
+  summary: >-
+    Allows a report too large for one message to be sent in parts. The protocol library handles it;
+    this tool does not show it.
+  related: [rcb.optflds, concept.pdu-size]
+
+# -----------------------------------------------------------------------------------------------------
+# Setting groups
+# -----------------------------------------------------------------------------------------------------
+- id: sgcb.sgcb
+  kind: concept
+  terms: [SGCB, setting group control block, setting group, setting groups, setgroup]
+  title: Setting groups (SGCB)
+  summary: >-
+    Many protection devices keep several complete sets of settings (setting groups) and use one at a
+    time. The setting group control block in LLN0 switches between them and controls editing.
+  details: |
+    The active group's values appear under FC=SG (read-only). To change them, a client selects a
+    group for editing (`EditSG`), writes the values under FC=SE, and confirms (`CnfEdit`). `setgroup`
+    runs that sequence. Switching the active group (`ActSG`) changes protection behaviour at once.
+
+    Snapshots only capture the active group, because reading other groups would require switching.
+  related: [sgcb.numofsg, sgcb.actsg, sgcb.editsg, sgcb.cnfedit, sgcb.lacttm, fc.sg, fc.se]
+
+- id: sgcb.numofsg
+  kind: term
+  terms: [NumOfSG, number of setting groups]
+  title: NumOfSG
+  summary: How many setting groups the logical device has.
+  related: [sgcb.sgcb]
+
+- id: sgcb.actsg
+  kind: term
+  terms: [ActSG, active setting group]
+  title: ActSG (active setting group)
+  summary: >-
+    The number of the setting group in use. Writing it switches the device to another group, which
+    changes protection behaviour immediately.
+  related: [sgcb.sgcb, sgcb.lacttm]
+
+- id: sgcb.editsg
+  kind: term
+  terms: [EditSG, edit setting group]
+  title: EditSG (group being edited)
+  summary: >-
+    The number of the setting group selected for editing; 0 means none. Its values then appear
+    under FC=SE.
+  related: [sgcb.sgcb, sgcb.cnfedit, fc.se]
+
+- id: sgcb.cnfedit
+  kind: term
+  terms: [CnfEdit, confirm edit]
+  title: CnfEdit (confirm edit)
+  summary: >-
+    Writing true confirms the values written to the group being edited, so the device stores them.
+  related: [sgcb.editsg, sgcb.sgcb]
+
+- id: sgcb.lacttm
+  kind: term
+  terms: [LActTm, last activation time]
+  title: LActTm (last activation time)
+  summary: When the active setting group was last changed.
+  related: [sgcb.actsg]

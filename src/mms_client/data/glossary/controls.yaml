@@ -1,0 +1,484 @@
+# Glossary: controls (sequences, parameters, authority, mode/behaviour, ctlModel and orCat values).
+# Format: see the header of data/hints.yaml.
+
+version: 1
+entries:
+
+# -----------------------------------------------------------------------------------------------------
+# Control model
+# -----------------------------------------------------------------------------------------------------
+- id: control.ctlmodel
+  kind: term
+  terms: [ctlModel, control model]
+  title: ctlModel (control model)
+  summary: >-
+    A configuration value of every controllable object that decides how it must be controlled:
+    not at all, directly, or with a select first, and whether the device reports the end of
+    execution.
+  details: |
+    The five values:
+    - 0 status-only: cannot be controlled over the network
+    - 1 direct-with-normal-security: operate only
+    - 2 sbo-with-normal-security: select, then operate
+    - 3 direct-with-enhanced-security: operate, then wait for the command termination
+    - 4 sbo-with-enhanced-security: select with value, operate, then wait for the command termination
+
+    `operate` reads ctlModel first and runs the matching sequence. It is an FC=CF attribute; many
+    devices do not let clients change it.
+  next_checks:
+    - "Read it with `read <object>.ctlModel`"
+  related: [ctlmodel.status-only, ctlmodel.direct-with-normal-security, ctlmodel.sbo-with-normal-security, ctlmodel.direct-with-enhanced-security, ctlmodel.sbo-with-enhanced-security]
+
+- id: ctlmodel.status-only
+  kind: term
+  terms: [status-only, ctlModel=0]
+  title: "ctlModel 0: status-only"
+  summary: >-
+    The object only reports its state; it cannot be controlled over the network. The tool refuses to
+    operate it.
+  related: [control.ctlmodel, tool:status-only-control]
+
+- id: ctlmodel.direct-with-normal-security
+  kind: term
+  terms: [direct-with-normal-security, direct-normal, ctlModel=1]
+  title: "ctlModel 1: direct control, normal security"
+  summary: >-
+    The client sends Operate and the device answers at once whether it accepted the command. There
+    is no select and no separate report of the result.
+  details: |
+    Check `stVal` afterwards to see whether the equipment actually moved. `authority-probe` cannot
+    test these objects because they have no select step.
+  related: [control.ctlmodel, control.oper, tool:not-probeable-direct-control]
+
+- id: ctlmodel.sbo-with-normal-security
+  kind: term
+  terms: [sbo-with-normal-security, sbo-normal, ctlModel=2]
+  title: "ctlModel 2: select before operate, normal security"
+  summary: >-
+    The client first selects the object (by reading its SBO attribute), then sends Operate within
+    the select timeout. The device answers each step at once.
+  related: [control.ctlmodel, control.sbo, control.sbotimeout]
+
+- id: ctlmodel.direct-with-enhanced-security
+  kind: term
+  terms: [direct-with-enhanced-security, direct-enhanced, ctlModel=3]
+  title: "ctlModel 3: direct control, enhanced security"
+  summary: >-
+    The client sends Operate; the device accepts or refuses it, and later reports whether execution
+    succeeded in a separate command termination.
+  related: [control.ctlmodel, control.commandtermination]
+
+- id: ctlmodel.sbo-with-enhanced-security
+  kind: term
+  terms: [sbo-with-enhanced-security, sbo-enhanced, ctlModel=4]
+  title: "ctlModel 4: select before operate, enhanced security"
+  summary: >-
+    The most careful sequence: select with the intended value (SBOw), operate, then wait for the
+    command termination that reports the final result.
+  details: |
+    The operate response only says the command was accepted. The command termination, which can
+    arrive seconds later (e.g. after the breaker has travelled), says whether it succeeded. A
+    negative termination carries a LastApplError with the AddCause.
+  related: [control.ctlmodel, control.sbow, control.commandtermination, control.lastapplerror]
+
+# -----------------------------------------------------------------------------------------------------
+# Control services and structures
+# -----------------------------------------------------------------------------------------------------
+- id: control.sbo
+  kind: concept
+  terms: [SBO, select before operate, select]
+  title: Select before operate (SBO)
+  summary: >-
+    A two-step control: the client first reserves (selects) the object, then operates it. Between
+    the steps nobody else can operate it.
+  details: |
+    With normal security the select is done by reading the object's SBO attribute: the device
+    returns the object's reference if the select succeeded and an empty answer if it did not. With
+    enhanced security the select is a write of the SBOw structure, which also tells the device the
+    intended value.
+
+    A selection lapses after `sboTimeout`, when cancelled, or when the association is lost.
+    `select` and `cancel` are available as separate commands for testing this behaviour.
+  related: [control.sbow, control.sbotimeout, control.cancel, control.stseld, ctlmodel.sbo-with-normal-security]
+
+- id: control.sbow
+  kind: term
+  terms: [SBOw, select with value, SelectWithValue]
+  title: SBOw (select with value)
+  summary: >-
+    The structure written to select an object with enhanced security. It carries the intended value
+    and the same origin and check fields as the later operate.
+  details: |
+    The operate must match what was selected; if it does not, the device refuses with
+    inconsistent-parameters.
+  related: [control.sbo, control.oper, add-cause:inconsistent-parameters]
+
+- id: control.oper
+  kind: term
+  terms: [Oper, operate]
+  title: Oper (operate)
+  summary: >-
+    The structure written to execute a command. It carries the new value (ctlVal), the origin, a
+    control number, a time, the Test flag and the check flags.
+  details: |
+    Clients never write Oper with a plain write in this tool; `operate` builds it and runs the right
+    sequence for the object's ctlModel.
+  related: [control.ctlval, control.origin, control.ctlnum, control.test, control.check, tool:write-co-needs-operate]
+
+- id: control.cancel
+  kind: term
+  terms: [Cancel]
+  title: Cancel
+  summary: >-
+    The structure written to withdraw a selection (or, on some devices, stop a running command).
+  details: |
+    `cancel` sends it on its own, which is useful for testing how a device releases a selection.
+    `authority-probe` uses select followed by cancel so that nothing is operated.
+  related: [control.sbo, add-cause:abortion-by-cancel]
+
+- id: control.commandtermination
+  kind: concept
+  terms: [CommandTermination, command termination, CmdTerm]
+  title: Command termination
+  summary: >-
+    With enhanced security, the device's separate message saying whether the command finished
+    successfully. It arrives after the operate response, once execution is complete.
+  details: |
+    A positive termination means the equipment reached the requested state. A negative one comes
+    with a LastApplError whose AddCause gives the reason. The tool reports the time between the
+    operate response and the termination.
+  related: [ctlmodel.sbo-with-enhanced-security, control.lastapplerror, tool:command-termination-timeout, tool:command-termination-negative]
+
+- id: control.lastapplerror
+  kind: term
+  terms: [LastApplError, last application error]
+  title: LastApplError
+  summary: >-
+    The report a device sends to a client when a control request or its execution fails. It names
+    the object, the error class, the origin, the control number and the AddCause.
+  related: [control.addcause, ctl-error:operator-test-not-ok, control.commandtermination]
+
+- id: control.addcause
+  kind: term
+  terms: [AddCause, additional cause]
+  title: AddCause
+  summary: >-
+    The reason a device gives for refusing or aborting a control, for example
+    blocked-by-interlocking or blocked-by-switching-hierarchy.
+  details: |
+    `explain add-cause:<name>` (or the number, e.g. `explain add-cause:10`) explains each value.
+  related: [control.lastapplerror, add-cause:blocked-by-switching-hierarchy, add-cause:blocked-by-interlocking]
+
+- id: control.ctlval
+  kind: term
+  terms: [ctlVal, control value]
+  title: ctlVal
+  summary: >-
+    The value a command asks for: true/false for SPC and DPC (for a switch, true means close/on),
+    an integer for INC.
+  related: [control.oper, cdc.dpc, cdc.spc, cdc.inc]
+
+- id: control.stval
+  kind: term
+  terms: [stVal, status value]
+  title: stVal
+  summary: >-
+    The current status value of a data object, maintained by the device (FC=ST). For a switch it is
+    the position.
+  details: |
+    After a control, `stVal` shows whether the equipment reached the requested state. The tool reads
+    it back after every operate.
+  related: [fc.st, cdc.dps, control.ctlval]
+
+- id: control.ctlnum
+  kind: term
+  terms: [ctlNum, control number]
+  title: ctlNum
+  summary: >-
+    A small sequence number the client puts in each command. The device echoes it in its answers and
+    records the last one received.
+  details: |
+    Reading `<object>.ctlNum` together with `origin` shows who sent the last command to an object,
+    which helps when checking what a neighbour actually sent.
+  related: [control.origin, control.oper]
+
+- id: control.origin
+  kind: concept
+  terms: [origin, orIdent, originator]
+  title: Origin (orCat and orIdent)
+  summary: >-
+    Who sent a command: the category of sender (orCat) and a free identifier (orIdent). The device
+    stores the origin of the last command it received.
+  details: |
+    This tool sends `mms-client/<user>@<host>` as orIdent unless told otherwise. Reading
+    `<object>.origin` shows what the last sender used, for example to see what a gateway sends.
+  related: [control.orcat, control.ctlnum]
+
+- id: control.orcat
+  kind: concept
+  terms: [orCat, originator category, origin category]
+  title: orCat (originator category)
+  summary: >-
+    The level a command claims to come from: bay, station, remote, automatic functions, maintenance
+    or process. The device uses it with its local/remote settings to decide whether to accept the
+    command.
+  details: |
+    orCat belongs to the command, not to a device: a station gateway may send remote-control for
+    commands from the control centre and station-control for its own HMI. The tool therefore asks
+    for it on the first control of a session (`set orcat`, `--orcat`). Values 1 to 3 are available
+    in standard mode; 0 and 4 to 8 need expert mode.
+  related: [concept.switching-hierarchy, orcat.bay-control, orcat.station-control, orcat.remote-control]
+
+- id: orcat.not-supported
+  kind: term
+  terms: [orCat=0, orCat not-supported]
+  title: "orCat 0: not-supported"
+  summary: The sender does not state a category. Expert mode only in this tool.
+  related: [control.orcat]
+
+- id: orcat.bay-control
+  kind: term
+  terms: [bay-control, bay control, orCat=1, bay]
+  title: "orCat 1: bay-control"
+  summary: >-
+    A command from the bay level, for example the bay controller's front panel or a local operator
+    panel.
+  related: [control.orcat, control.loc]
+
+- id: orcat.station-control
+  kind: term
+  terms: [station-control, station control, orCat=2, station]
+  title: "orCat 2: station-control"
+  summary: A command from the station level, for example the station HMI.
+  related: [control.orcat, control.locsta]
+
+- id: orcat.remote-control
+  kind: term
+  terms: [remote-control, remote control, orCat=3, remote]
+  title: "orCat 3: remote-control"
+  summary: >-
+    A command from outside the station, for example the network control centre through the station
+    gateway.
+  related: [control.orcat, control.locsta]
+
+- id: orcat.automatic-bay
+  kind: term
+  terms: [automatic-bay, auto-bay, orCat=4]
+  title: "orCat 4: automatic-bay"
+  summary: A command from an automatic function at bay level. Expert mode only in this tool.
+  related: [control.orcat]
+
+- id: orcat.automatic-station
+  kind: term
+  terms: [automatic-station, auto-station, orCat=5]
+  title: "orCat 5: automatic-station"
+  summary: A command from an automatic function at station level. Expert mode only in this tool.
+  related: [control.orcat]
+
+- id: orcat.automatic-remote
+  kind: term
+  terms: [automatic-remote, auto-remote, orCat=6]
+  title: "orCat 6: automatic-remote"
+  summary: A command from an automatic function outside the station. Expert mode only in this tool.
+  related: [control.orcat]
+
+- id: orcat.maintenance
+  kind: term
+  terms: [maintenance, orCat=7]
+  title: "orCat 7: maintenance"
+  summary: A command from a maintenance or service tool. Expert mode only in this tool.
+  related: [control.orcat]
+
+- id: orcat.process
+  kind: term
+  terms: [process, orCat=8]
+  title: "orCat 8: process"
+  summary: >-
+    A change caused by the process itself rather than by a command, for example a breaker tripped by
+    protection. Expert mode only in this tool.
+  related: [control.orcat]
+
+- id: control.test
+  kind: term
+  terms: [Test, test flag]
+  title: Test flag (control)
+  summary: >-
+    A flag in a command saying it is a test. The device decides from its mode/behaviour whether to
+    accept test commands and whether to pass them on to the equipment.
+  details: |
+    Broadly, devices in normal operation refuse commands marked as test, and devices in test mode
+    accept them. Details vary by edition and vendor; a mismatch is usually refused with AddCause
+    blocked-by-mode. For Ed2 devices the tool shows `Mod`/`Beh` before operating.
+  related: [control.mod, control.beh, add-cause:blocked-by-mode, quality.test]
+
+- id: control.check
+  kind: term
+  terms: [Check, check flags, check parameter]
+  title: Check flags (interlock and synchrocheck)
+  summary: >-
+    Two flags in a command asking the device to apply interlocking and synchrocheck before
+    executing.
+  details: |
+    This tool always sets both in standard mode. Clearing them is possible in expert mode, is logged,
+    and is meant for negative testing only. Some devices ignore the flags and always check.
+  related: [control.interlocking, control.synchrocheck, concept.tool-modes]
+
+- id: control.interlocking
+  kind: concept
+  terms: [interlocking, interlock]
+  title: Interlocking
+  summary: >-
+    Logic that forbids unsafe switching, for example opening a disconnector while current flows or
+    closing an earthing switch onto a live part.
+  details: |
+    The interlocking logical node (CILO) shows whether opening (`EnaOpn`) and closing (`EnaCls`) are
+    currently allowed. The inputs often come from other bays over GOOSE, which this tool cannot see.
+  related: [ln.cilo, add-cause:blocked-by-interlocking, control.check, scope.goose]
+
+- id: control.synchrocheck
+  kind: concept
+  terms: [synchrocheck, synchro-check, synchronism check, sync check]
+  title: Synchrocheck
+  summary: >-
+    A check that two parts of the network are close enough in voltage, frequency and phase angle
+    before a breaker joins them.
+  details: |
+    It only applies to closing. On an isolated rack the voltage inputs are often missing, which
+    keeps synchrocheck from releasing unless dead-line/dead-bus closing is allowed in the settings.
+  related: [ln.csyn, ln.rsyn, add-cause:blocked-by-synchrocheck, control.check]
+
+- id: control.sbotimeout
+  kind: term
+  terms: [sboTimeout, select timeout, SBO timeout]
+  title: sboTimeout
+  summary: >-
+    How long a selection stays valid before the device releases it (a configuration value, usually
+    in milliseconds).
+  details: |
+    The operate must arrive within this time. Typed confirmations take time too, which is why the
+    tool shows the time taken by each step.
+  related: [control.sbo, add-cause:object-not-selected, tool:select-timeout-expired]
+
+- id: control.stseld
+  kind: term
+  terms: [stSeld, selected status]
+  title: stSeld
+  summary: Shows whether the object is currently selected (where the device provides it).
+  related: [control.sbo, add-cause:object-already-selected]
+
+- id: control.sboclass
+  kind: term
+  terms: [sboClass]
+  title: sboClass
+  summary: >-
+    Whether one selection allows a single operate or several operates before it lapses.
+  related: [control.sbo]
+
+- id: control.operate-received
+  kind: term
+  terms: [opRcvd, opOk, tOpOk]
+  title: Operate received / operate OK (Ed2)
+  summary: >-
+    Ed2 attributes (FC=OR) showing that an operate was received and accepted, and when the output
+    was activated.
+  related: [fc.or, control.oper]
+
+# -----------------------------------------------------------------------------------------------------
+# Authority: switching hierarchy
+# -----------------------------------------------------------------------------------------------------
+- id: concept.switching-hierarchy
+  kind: concept
+  terms: [switching hierarchy, control authority, local/remote, control hierarchy]
+  title: Switching hierarchy (who may control)
+  summary: >-
+    The rule that only one level at a time (equipment, bay, station or remote) has authority to
+    control an object. The device checks the command's orCat against its local/remote settings.
+  details: |
+    The settings involved:
+    - `Loc`: the bay or equipment is in local; commands from station and remote levels are refused.
+      Often driven by a key switch or the front panel.
+    - `LocKey`: the position of such a key switch, where the device models it separately.
+    - `LocSta` (Ed2): station level has authority rather than the remote control centre.
+
+    Vendors implement the details differently. `authority-probe` shows, per object, which orCat
+    values the device accepts at the moment, next to these settings, without operating anything.
+  next_checks:
+    - "Read `Loc`, `LocSta` and `LocKey` on the control LN and LLN0"
+    - "Run `authority-probe`"
+  related: [control.loc, control.locsta, control.lockey, control.orcat, add-cause:blocked-by-switching-hierarchy]
+
+- id: control.loc
+  kind: term
+  terms: [Loc, local, local mode]
+  title: Loc (local control behaviour)
+  summary: >-
+    When true, the object (or the whole logical device) is in local: commands from station and
+    remote levels are refused.
+  details: |
+    It may appear in the control LN (e.g. CSWI), the switchgear LN (XCBR/XSWI) and LLN0, depending on
+    vendor and edition. It is usually driven by a physical key switch or the front panel.
+  related: [concept.switching-hierarchy, control.locsta, control.lockey]
+
+- id: control.locsta
+  kind: term
+  terms: [LocSta, station authority]
+  title: LocSta (station-level authority, Ed2)
+  summary: >-
+    When true, the station level has control authority and commands from the remote control centre
+    are refused. When false, remote has authority.
+  details: |
+    Added in Ed2, so Ed1 devices do not have it. How station-level commands are treated while it
+    is false varies between vendors.
+  related: [concept.switching-hierarchy, control.loc, check:locsta-missing]
+
+- id: control.lockey
+  kind: term
+  terms: [LocKey, local key, key switch]
+  title: LocKey (local/remote key)
+  summary: >-
+    The position of a local/remote key switch, where the device models it separately from `Loc`.
+  related: [concept.switching-hierarchy, control.loc]
+
+# -----------------------------------------------------------------------------------------------------
+# Mode, behaviour and health
+# -----------------------------------------------------------------------------------------------------
+- id: control.mod
+  kind: term
+  terms: [Mod, LN mode]
+  title: Mod (mode)
+  summary: >-
+    The operating mode set for a logical node or logical device: on, blocked, test, test/blocked or
+    off.
+  details: |
+    - on: normal operation
+    - blocked: the function runs but its outputs to the equipment are blocked
+    - test: the function runs for testing and accepts test commands
+    - test/blocked: test, with outputs to the equipment blocked
+    - off: the function does not run
+
+    A logical node's actual behaviour (`Beh`) also depends on the mode of its logical device, so
+    read `Beh` to see what is really in effect.
+  related: [control.beh, add-cause:blocked-by-mode, control.test]
+
+- id: control.beh
+  kind: term
+  terms: [Beh, behaviour, behavior]
+  title: Beh (behaviour)
+  summary: >-
+    The mode actually in effect for a logical node, combining its own `Mod` with the mode of the
+    logical device(s) it belongs to. Read-only.
+  details: |
+    If `Beh` is off, blocked or test while `Mod` of the node is on, look at `LLN0.Mod` of the logical
+    device.
+  related: [control.mod, ln.lln0]
+
+- id: control.health
+  kind: term
+  terms: [Health, PhyHealth, EEHealth]
+  title: Health
+  summary: >-
+    The self-supervision result of a function or device: ok, warning or alarm. In alarm the function
+    does not work properly and commands are refused.
+  details: |
+    `Health` exists per logical node and in LLN0; `LPHD1.PhyHealth` covers the physical device.
+  related: [add-cause:blocked-by-health, ln.lphd]

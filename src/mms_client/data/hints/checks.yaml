@@ -1,0 +1,388 @@
+# Hints for failed (or noteworthy) checks. Keys are "check:<check id>" as used by the check engine.
+# Format: see the header of data/hints.yaml.
+#
+# The check engine has already established the finding itself, so a hint that only restates the
+# finding may be a `fact`. Anything about *why* it happened is `likely` or `check`.
+
+version: 1
+entries:
+
+- id: check.unlisted
+  keys: ["check:*"]
+  title: Check without a catalogue entry
+  summary: This check result has no entry in the catalogue yet.
+  next_checks:
+    - "Look at the evidence and raw responses in the check result"
+  related: [code.unlisted]
+  hint: "the evidence in the check result; this check has no catalogue entry yet"
+  certainty: check
+
+# -----------------------------------------------------------------------------------------------------
+# Self-consistency checks (always run, §12.3)
+# -----------------------------------------------------------------------------------------------------
+- id: check.rcb-dataset-missing
+  keys: [check:rcb-dataset-missing]
+  title: RCB refers to a missing dataset
+  summary: >-
+    A report control block names a dataset (DatSet) that does not exist on the device, so it cannot
+    report anything useful.
+  details: |
+    This is a configuration error in the device: the dataset was renamed or removed without updating
+    the report control block, or the configuration was only partly loaded. A client relying on this
+    block will receive nothing or fail to enable it.
+  next_checks:
+    - "List datasets with `dataset` and the blocks with `rcb`"
+    - "Compare with the SCD/CID used to configure the device"
+  related: [rcb.datset, concept.dataset, check:confrev-mismatch]
+  hint: "This RCB's DatSet names a dataset the device does not have; compare `rcb` and `dataset` with the SCD"
+  certainty: fact
+
+- id: check.dataset-member-unresolved
+  keys: [check:dataset-member-unresolved]
+  title: Dataset member does not resolve
+  summary: A member of a dataset does not correspond to any object on the device.
+  details: |
+    Reports built from this dataset may be rejected by the device or be incomplete. This usually
+    comes from a configuration change that removed or renamed the object.
+  next_checks:
+    - "Run `dataset <name>` to see which members resolve"
+    - "Compare with the SCD/CID"
+  related: [concept.dataset, check:model-object-missing]
+  hint: "A dataset member does not resolve to an object on the device; run `dataset <name>` and compare with the SCD"
+  certainty: fact
+
+- id: check.rcb-enabled-by-unknown-client
+  keys: [check:rcb-enabled-by-unknown-client]
+  title: RCB enabled by an unknown client
+  summary: >-
+    A report control block is enabled by a client that is not in the experiment inventory.
+  details: |
+    The Owner attribute (Ed2) or the reservation shows a client address that the inventory does not
+    know. It may be a forgotten test tool, a client missing from the inventory, or a device that
+    reports Owner in an unexpected form.
+  next_checks:
+    - "Run `rcb` to see the Owner address"
+    - "Find the machine with that address; add it to the inventory if it belongs to the experiment"
+  related: [rcb.owner, rcb.rptena]
+  hint: "An RCB is enabled by a client not in the inventory; run `rcb` for its Owner address and identify that machine"
+  certainty: fact
+
+- id: check.rcb-reserved-by-unknown-client
+  keys: [check:rcb-reserved-by-unknown-client]
+  title: RCB reserved by an unknown client
+  summary: >-
+    A report control block is reserved (Resv or ResvTms) by a client that is not in the inventory.
+  details: |
+    A buffered block stays reserved for its last client for the reservation time (ResvTms), so a
+    client that has gone away can still hold it for a while.
+  next_checks:
+    - "Run `rcb` to see Owner, Resv and ResvTms"
+    - "Wait for the reservation to expire if the client has gone"
+  related: [rcb.resv, rcb.resvtms, rcb.owner]
+  hint: "An RCB is reserved by a client not in the inventory (possibly one that left recently, see ResvTms); run `rcb`"
+  certainty: fact
+
+- id: check.brcb-buffer-overflow
+  keys: [check:brcb-buffer-overflow]
+  title: Buffered report buffer overflowed
+  summary: >-
+    A buffered report control block reports BufOvfl: its buffer overflowed and events were lost for
+    its client.
+  details: |
+    A buffered block keeps events while its client is away. If the client stays away too long, or
+    events arrive faster than they are sent, the oldest are dropped. The client can no longer rely on
+    a complete event history for that period.
+  next_checks:
+    - "Find out whether the client was disconnected (session logs, the client's own event list)"
+    - "Check the triggers (TrgOps) and IntgPd for settings that produce more reports than needed"
+  related: [rcb.bufovfl, concept.brcb]
+  hint: "A buffered RCB overflowed and lost events for its client; check whether the client was away and whether triggers are too busy"
+  certainty: fact
+
+- id: check.writable-attribute-refused
+  keys: [check:writable-attribute-refused]
+  title: Writable attribute refused
+  summary: The model marks this attribute as writable, but the device refused the write.
+  details: |
+    The device's model and its behaviour disagree. Usual reasons are access rules for this client,
+    source-IP filtering, a settings lock on the device, or a device that simply does not implement
+    writes to this attribute.
+  next_checks:
+    - "Retry as the client that normally writes it (`--as <client>`)"
+    - "Check the device's settings-protection options"
+  related: [data-access:object-access-denied, data-access:object-access-unsupported]
+  hint: "The model says writable but the device refused; check access rules, source IP (`--as <client>`) and settings locks"
+  certainty: fact
+
+# -----------------------------------------------------------------------------------------------------
+# Comparison with a reference (SCD / CID / snapshot, §12)
+# -----------------------------------------------------------------------------------------------------
+- id: check.confrev-mismatch
+  keys: [check:confrev-mismatch]
+  title: ConfRev differs from the reference
+  summary: >-
+    The configuration revision of a report control block differs from the reference, so the
+    device's dataset/report configuration and the reference have diverged.
+  details: |
+    ConfRev changes whenever the dataset or report configuration behind a block changes. A client
+    configured from the reference (for example a gateway configured from the SCD) expects the old
+    value and may reject or misread the reports. A CID exported from an older SCD can match its
+    device and still be wrong for the rack.
+  next_checks:
+    - "Find out which side is newer: the device's configuration or the reference"
+    - "Re-export or reload the configuration so both agree"
+  related: [rcb.confrev, check:dataset-mismatch]
+  hint: "ConfRev differs from the reference: the device's report/dataset configuration and the reference have diverged; find out which is newer"
+  certainty: fact
+
+- id: check.model-object-missing
+  keys: [check:model-object-missing]
+  title: Object missing from the device
+  summary: An object the reference expects is not in the device's model.
+  details: |
+    The device runs a different configuration than the reference (an older or newer version, or an
+    ICD/template rather than the project configuration), or the object only exists in another
+    edition.
+  next_checks:
+    - "Check which configuration version the device runs (`info`: configRev, swRev)"
+    - "Make sure the reference is the one actually loaded into the device"
+  related: [check:model-object-unexpected, data-access:object-non-existent, concept.edition]
+  hint: "The reference expects an object the device does not have; check that the reference matches the configuration loaded in the device"
+  certainty: fact
+
+- id: check.model-object-unexpected
+  keys: [check:model-object-unexpected]
+  title: Object not in the reference
+  summary: The device has an object that the reference does not contain.
+  details: |
+    Usually harmless (vendor-specific extras, or a reference that is older than the device's
+    configuration), but it also shows that the reference and the device are not the same version.
+  next_checks:
+    - "Check whether the reference is older than the device's configuration"
+  related: [check:model-object-missing]
+  hint: "The device has an object the reference lacks; often vendor extras, but check that the reference is current"
+  certainty: fact
+
+- id: check.model-type-mismatch
+  keys: [check:model-type-mismatch]
+  title: Type differs from the reference
+  summary: An object has a different data type (or CDC) on the device than in the reference.
+  details: |
+    Clients configured from the reference may fail to read or write it. Edition changes (e.g. INS in
+    Ed1 becoming ENS in Ed2) are a common source.
+  next_checks:
+    - "Compare `describe <reference>` with the reference's data type templates"
+    - "Check both sides' editions"
+  related: [data-access:type-inconsistent, concept.edition]
+  hint: "The type differs between device and reference (edition differences such as INS vs ENS are common); compare with `describe`"
+  certainty: fact
+
+- id: check.model-fc-mismatch
+  keys: [check:model-fc-mismatch]
+  title: Functional constraint differs from the reference
+  summary: An attribute has a different FC on the device than in the reference.
+  details: |
+    Clients address attributes by FC, so a client configured from the reference will not find it.
+  next_checks:
+    - "Compare `describe <reference>` with the reference"
+  related: [concept.fc]
+  hint: "The attribute's FC differs between device and reference, so clients configured from the reference will not find it"
+  certainty: fact
+
+- id: check.config-value-mismatch
+  keys: [check:config-value-mismatch]
+  title: Configuration value differs
+  summary: A configuration or setting value differs from the reference.
+  details: |
+    This may be intended (a setting changed for the experiment) or a sign that the device was not
+    configured as documented.
+  next_checks:
+    - "Decide whether the change was intended; if not, restore it with `write` or `setgroup`"
+  related: [fc.cf, fc.sp, fc.sg]
+  hint: "A configuration value differs from the reference; decide whether the change was intended"
+  certainty: fact
+
+- id: check.dataset-mismatch
+  keys: [check:dataset-mismatch]
+  title: Dataset differs from the reference
+  summary: A dataset's members or their order differ from the reference.
+  details: |
+    Reports carry values in dataset order, so a client configured from the reference will
+    misinterpret them. ConfRev should also have changed.
+  next_checks:
+    - "Run `dataset <name>` and compare with the reference"
+    - "Check the ConfRev of the blocks that use it"
+  related: [concept.dataset, check:confrev-mismatch]
+  hint: "The dataset's members or order differ from the reference; clients configured from the reference will misread reports"
+  certainty: fact
+
+- id: check.rcb-attribute-mismatch
+  keys: [check:rcb-attribute-mismatch]
+  title: RCB attribute differs from the reference
+  summary: >-
+    A report control block attribute (e.g. DatSet, RptID, TrgOps, IntgPd, OptFlds, BufTm) differs from
+    the reference.
+  details: |
+    Clients may change some of these at run time (TrgOps, IntgPd, OptFlds are commonly written when
+    enabling), so a difference on an enabled block is not always a configuration error.
+  next_checks:
+    - "Run `rcb` and see whether the block is enabled and by whom"
+  related: [concept.rcb, rcb.trgops, rcb.optflds]
+  hint: "An RCB attribute differs from the reference; if the block is enabled its client may have set it, so check `rcb`"
+  certainty: fact
+
+- id: check.address-mismatch
+  keys: [check:address-mismatch]
+  title: Address differs from the reference
+  summary: >-
+    The device's network address differs from its entry in the reference (SCD communication section)
+    or the inventory.
+  details: |
+    Clients configured from the SCD will try the address in the SCD and not reach the device.
+  next_checks:
+    - "Check the device's configured IP and the SCD's ConnectedAP address"
+  related: [association:host-unreachable]
+  hint: "The device's address differs from the SCD/inventory, so clients configured from it will not reach the device"
+  certainty: fact
+
+- id: check.identity-disagreement
+  keys: [check:identity-disagreement]
+  title: Identity sources disagree
+  summary: >-
+    The identity sources (MMS Identify, LPHD.PhyNam, LLN0.NamPlt) report different vendors, models or
+    versions.
+  details: |
+    This is often normal: the MMS Identify answer may describe the communication stack inside the
+    device rather than the device itself. It matters when choosing quirks or deciding the edition.
+  next_checks:
+    - "Look at all sources in `info` and decide which describes the device"
+    - "Record the correct identity in the inventory"
+  related: [concept.identify, cdc.dpl, cdc.lpl]
+  hint: "Identity sources disagree (often the MMS stack vendor differs from the device vendor); see `info` and set the identity in the inventory"
+  certainty: fact
+
+- id: check.edition-mismatch
+  keys: [check:edition-mismatch]
+  title: Client and device editions differ
+  summary: The client's edition differs from the device's, so compatibility checks apply.
+  details: |
+    Mixed editions mostly work, but differences in object reference length limits, new attributes
+    (e.g. ResvTms, Owner) and data classes can break individual functions.
+  next_checks:
+    - "Look at the compatibility results that follow (e.g. reference lengths)"
+  related: [concept.edition, check:object-reference-too-long]
+  hint: "Client and device editions differ; see the compatibility results (reference lengths, Ed2-only attributes)"
+  certainty: fact
+
+- id: check.object-reference-too-long
+  keys: [check:object-reference-too-long]
+  title: Object reference too long for the client's edition
+  summary: >-
+    An object reference on the device is longer than the client's edition allows, so that client may
+    not be able to address it.
+  details: |
+    Later editions allow longer names than Ed1. A long IED or logical device name is the usual
+    reason.
+  next_checks:
+    - "Shorten the IED or logical device name in the configuration, if the older client must use it"
+  related: [concept.edition, check:edition-mismatch]
+  hint: "This reference is longer than the client's edition allows; shorten the IED or LD name if that client needs it"
+  certainty: fact
+
+- id: check.locsta-missing
+  keys: [check:locsta-missing]
+  title: LocSta not present
+  summary: The device has no LocSta. Whether that matters depends on the edition.
+  details: |
+    LocSta (station-level control authority) was added in Ed2. An Ed1 device is not expected to have
+    it. An Ed2 device without it must decide between station and remote commands another way,
+    which can surprise the station.
+  next_checks:
+    - "Make sure the device's edition is known (`info`)"
+    - "On Ed2, run `authority-probe` to see how station and remote commands are treated"
+  related: [control.locsta, concept.switching-hierarchy, concept.edition]
+  hint: "that the device's edition is known: a missing LocSta is expected on Ed1 but a warning on Ed2"
+  certainty: check
+
+- id: check.locsta-missing.ed1
+  keys: [check:locsta-missing]
+  when: {edition: Ed1}
+  hint: "LocSta only exists from Ed2 on, so its absence on an Ed1 device is expected and not an issue"
+  certainty: fact
+
+- id: check.locsta-missing.ed2
+  keys: [check:locsta-missing]
+  when: {edition: [Ed2, Ed2.1]}
+  hint: "how station and remote commands are treated, with `authority-probe`: Ed2 devices normally offer LocSta for station-level authority"
+  certainty: check
+
+- id: check.locsta-missing.unknown
+  keys: [check:locsta-missing]
+  when: {edition: unknown}
+  hint: "the device's edition (set it in the inventory); a missing LocSta cannot be judged without it"
+  certainty: check
+
+# -----------------------------------------------------------------------------------------------------
+# Communication checks (acting as the neighbour, §12.4)
+# -----------------------------------------------------------------------------------------------------
+- id: check.client-rcb-missing
+  keys: [check:client-rcb-missing]
+  title: Client's report control block missing
+  summary: A report control block that a client needs (per inventory or SCD) does not exist on the device.
+  details: |
+    That client cannot receive the reports it expects. The device configuration or the client's
+    configuration is out of date.
+  next_checks:
+    - "List the device's blocks with `rcb` and compare with the SCD's client assignments"
+  related: [check:client-rcb-not-available, concept.rcb]
+  hint: "The RCB this client needs does not exist on the device; compare `rcb` with the SCD's client assignments"
+  certainty: fact
+
+- id: check.client-rcb-not-available
+  keys: [check:client-rcb-not-available]
+  title: Client's report control block not available
+  summary: >-
+    The block a client needs exists but is enabled or reserved by someone else, so the real client
+    could not enable it.
+  details: |
+    Another client (or a reservation left behind by one) holds it. A buffered block may stay reserved
+    for its last client for the reservation time (ResvTms).
+  next_checks:
+    - "Run `rcb` to see Owner, Resv and ResvTms"
+    - "Find and stop the client holding it, or wait for the reservation to expire"
+  related: [rcb.owner, rcb.resvtms, tool:rcb-owned-by-other-client]
+  hint: "The client's RCB is held by someone else (enabled or reserved); run `rcb` to see who"
+  certainty: fact
+
+- id: check.device-supplied-reference
+  keys: [check:device-supplied-reference]
+  title: Reference supplied by the device
+  summary: >-
+    The reference used here is an SCL file found on the device itself: the device's own claim about
+    its configuration, not an independent reference.
+  details: |
+    Differences found against it are real, but a match only shows that the device is consistent
+    with its own file; it does not show that the configuration is right for the rack. Prefer the
+    project's SCD when available.
+  next_checks:
+    - "Supply the project's SCD or the engineered CID for an independent comparison"
+  related: [concept.scl]
+  hint: "The reference is the device's own SCL file; a match shows self-consistency, not that the configuration is right for the rack"
+  certainty: fact
+
+- id: check.snapshot-difference
+  keys: [check:snapshot-difference]
+  title: Differs from the snapshot
+  summary: >-
+    Something on the device differs from the snapshot it was compared with. The result shows the
+    old and new values.
+  details: |
+    Snapshot differences are graded by layer: structure changes fail, configuration value changes
+    warn, and operational state (such as `Mod`, `Beh`, `Loc`, `LocSta`, `Health` or report control
+    block state) is reported as information, because it changes in normal operation.
+  next_checks:
+    - "Look at the old and new values and decide whether the change was intended"
+    - "Add attributes that change legitimately (e.g. counters) to the experiment's ignore file"
+  related: [check:config-value-mismatch, check:model-object-missing]
+  hint: "Something differs from the snapshot; see the old and new values in the result and decide whether the change was intended"
+  certainty: fact

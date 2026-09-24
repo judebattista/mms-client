@@ -1,0 +1,41 @@
+# Known vendor / model / firmware quirks (IDN-9).
+#
+# This file starts empty. It grows from the spikes (RSK-6) and from incident files (LOG-3): record
+# only behaviour that has been observed on a real device, and always say where it was observed.
+# Checks and hints may use these entries (for example DIA-4 shows the association limit).
+#
+# Entries go in the `quirks:` list at the end of this file (mms_client.quirks.QuirkDB.append_entry
+# appends there, so keep `quirks:` as the last top-level key). Extra files with the same format can
+# be layered on top, e.g. per experiment.
+#
+# Matching: `match.vendor`, `match.model` and (optionally) `match.firmware` are compared with the
+# identity the device reports (MMS Identify vendor / model / revision). Each is an exact string or a
+# glob pattern (`*`, `?`, `[...]`); comparison ignores case and surrounding spaces. An entry without
+# `firmware` matches every firmware. When several entries match, the most specific wins (exact
+# beats glob, and a firmware condition counts); at equal specificity the entry loaded last wins.
+#
+# Fields (all optional except `match`; unknown fields are kept and shown as-is):
+#   max_associations: <int>                         simultaneous MMS associations the device accepts
+#   slot_release_after_abrupt_disconnect_s: <num>   seconds until a slot held by a client that vanished
+#                                                   without releasing (cable pulled, crash) is freed
+#   refusal_behaviour: <text>                       what the device does when all slots are in use
+#   rcb_reservation_notes: <text>
+#   resv_tms_behaviour: <text>
+#   setting_group_notes: <text>
+#   identity_notes: <text>                          e.g. how Identify / LPHD.PhyNam / ldNs are filled in
+#   notes: <text>
+#   source: <text>                                  spike or incident file that established this
+#   added: <YYYY-MM-DD>
+#
+# Example (not active):
+#
+#   - match: {vendor: "ExampleVendor", model: "BCU-5*", firmware: "2.3.*"}
+#     max_associations: 4
+#     slot_release_after_abrupt_disconnect_s: 120
+#     refusal_behaviour: "TCP accepted, then closed immediately when all slots are in use"
+#     resv_tms_behaviour: "ResvTms is read-only; reservation lasts 60 s after disconnect"
+#     source: "incidents/2026-10-02-bcu5-assoc.json"
+#     added: 2026-10-02
+
+schema_version: 1
+quirks:

@@ -1,0 +1,393 @@
+# Glossary: logical node classes.
+# Format: see the header of data/hints.yaml.
+#
+# `explain` also accepts logical node names such as Q0XCBR1 or PROT_PTOC2 and maps them to their
+# class. Data object names mentioned here are the common ones; devices may use more or fewer.
+
+version: 1
+entries:
+
+# -----------------------------------------------------------------------------------------------------
+# System (L)
+# -----------------------------------------------------------------------------------------------------
+- id: ln.lln0
+  terms: [LLN0, LN0, logical node zero]
+  title: "LLN0: logical device management"
+  summary: >-
+    The node every logical device has for itself. It carries the logical device's mode, behaviour,
+    health and name plate, and hosts its datasets and control blocks (reports, logs, GOOSE, setting
+    groups).
+  details: |
+    `LLN0.Mod` affects every node in the logical device, which is why a node's `Beh` can differ from
+    its own `Mod`. `LLN0.NamPlt` gives the configuration revision and namespace (edition). Depending
+    on edition and vendor, `Loc`, `LocSta` and `LocKey` may also be here for the whole logical device.
+  related: [control.mod, control.beh, cdc.lpl, concept.rcb, sgcb.sgcb]
+
+- id: ln.lphd
+  terms: [LPHD, physical device]
+  title: "LPHD: physical device"
+  summary: >-
+    Information about the IED hardware as a whole: its name plate (`PhyNam`: vendor, model, serial
+    number, versions) and its overall health (`PhyHealth`).
+  details: |
+    In Ed2 it also has `Sim`, which switches the device to accept simulated GOOSE/SV messages for
+    testing. Useful to read when a device reports hardware faults or health alarms.
+  related: [cdc.dpl, control.health, concept.identify]
+
+- id: ln.lgos
+  terms: [LGOS, GOOSE supervision]
+  title: "LGOS: GOOSE subscription supervision (Ed2)"
+  summary: >-
+    On a device that receives GOOSE, shows whether a subscribed GOOSE message is arriving as
+    expected. It can be read over MMS, so it is this tool's main window onto GOOSE problems.
+  details: |
+    Typical contents are the subscription status, the reference of the GOOSE control block being
+    watched, and counters of the last message received. If a bay's interlocking or control depends
+    on GOOSE from another device, reading LGOS on the receiving device shows whether that GOOSE is
+    getting through. Not every device implements it.
+  next_checks:
+    - "`ls` the receiving device for LGOS nodes and read their status"
+  related: [scope.goose, ln.lsvs, add-cause:blocked-by-interlocking]
+
+- id: ln.lsvs
+  terms: [LSVS, SV supervision]
+  title: "LSVS: Sampled Values subscription supervision (Ed2)"
+  summary: >-
+    On a device that receives Sampled Values, shows whether a subscribed stream is arriving as
+    expected. Readable over MMS.
+  related: [scope.sampled-values, ln.lgos]
+
+- id: ln.ltrk
+  terms: [LTRK, service tracking node]
+  title: "LTRK: service tracking (Ed2)"
+  summary: >-
+    Records the last services performed on the device, such as controls and report control block
+    changes, including who sent them.
+  details: |
+    Where present, it can show what a neighbour actually sent (for example the origin of a command),
+    which helps when a control from another client fails.
+  related: [fc.sr, control.origin]
+
+- id: ln.lcch
+  terms: [LCCH, channel supervision]
+  title: "LCCH: communication channel supervision"
+  summary: >-
+    Supervises the device's physical communication ports (e.g. whether a link, or its redundant
+    partner, is alive).
+  related: [add-cause:abortion-by-communication-loss]
+
+- id: ln.ltim
+  terms: [LTIM, time management]
+  title: "LTIM: time management"
+  summary: The device's local time settings, such as time zone and daylight saving.
+  related: [ln.ltms, concept.timestamp]
+
+- id: ln.ltms
+  terms: [LTMS, time master supervision, time synchronisation]
+  title: "LTMS: time master supervision (Ed2)"
+  summary: >-
+    Shows which time source the device uses and whether it is synchronised. Unsynchronised clocks
+    make timestamps in reports unreliable.
+  related: [ln.ltim, concept.timestamp]
+
+# -----------------------------------------------------------------------------------------------------
+# Switchgear (X) and control (C)
+# -----------------------------------------------------------------------------------------------------
+- id: ln.xcbr
+  terms: [XCBR, circuit breaker, breaker]
+  title: "XCBR: circuit breaker"
+  summary: >-
+    Represents a circuit breaker: its position (`Pos`), blocking of opening and closing
+    (`BlkOpn`, `BlkCls`), its operating capability and an operation counter.
+  details: |
+    Clients usually control the breaker through the switch controller (CSWI), which applies
+    interlocking and authority checks and then drives XCBR. Some devices also allow controlling
+    `XCBR.Pos` directly. A breaker that refuses to move with blocked-by-process often shows why in
+    XCBR (e.g. blocking or operating capability).
+  related: [ln.cswi, ln.xswi, cdc.dpc, add-cause:blocked-by-process]
+
+- id: ln.xswi
+  terms: [XSWI, disconnector, earthing switch]
+  title: "XSWI: switch (disconnector, earthing switch)"
+  summary: >-
+    Represents a switch that is not a circuit breaker, such as a disconnector or earthing switch:
+    its position, blocking and switch type.
+  related: [ln.xcbr, ln.cswi, ln.cilo]
+
+- id: ln.cswi
+  terms: [CSWI, switch controller]
+  title: "CSWI: switch controller"
+  summary: >-
+    The usual control point for a breaker or switch. Operating `CSWI*.Pos` asks the device to switch;
+    it checks authority, mode and interlocking before driving the switchgear node (XCBR/XSWI).
+  details: |
+    `ctlModel`, `sboTimeout`, `origin` and `ctlNum` of the command are found under `Pos`. `Loc` and
+    (in Ed2) `LocSta` may be in CSWI or in LLN0.
+  next_checks:
+    - "Run `describe <LD>/CSWI1.Pos` to see the control model"
+    - "Run `authority-probe <LD>/CSWI1.Pos` to test which orCat values are accepted"
+  related: [ln.xcbr, ln.xswi, ln.cilo, cdc.dpc, control.ctlmodel]
+
+- id: ln.cilo
+  terms: [CILO, interlocking node]
+  title: "CILO: interlocking"
+  summary: >-
+    Publishes whether opening (`EnaOpn`) and closing (`EnaCls`) of a switch are currently allowed by
+    the interlocking logic.
+  details: |
+    The logic behind it often uses positions from other bays received over GOOSE, which this tool
+    cannot see. If `EnaOpn`/`EnaCls` is false while the switchgear looks right, check whether the
+    GOOSE inputs arrive (LGOS or Wireshark).
+  related: [control.interlocking, add-cause:blocked-by-interlocking, ln.lgos]
+
+- id: ln.csyn
+  terms: [CSYN, synchronizer]
+  title: "CSYN: synchronising / synchrocheck control"
+  summary: >-
+    Decides whether a breaker may close between two parts of the network by checking voltage,
+    frequency and angle differences, and releases the close when they are within limits.
+  details: |
+    Depending on edition and vendor, the synchrocheck function appears as CSYN or as RSYN.
+  related: [ln.rsyn, control.synchrocheck, add-cause:blocked-by-synchrocheck]
+
+- id: ln.calh
+  terms: [CALH, alarm handling, group alarm]
+  title: "CALH: alarm handling"
+  summary: Combines individual alarms and warnings into group alarms.
+  related: [control.health]
+
+# -----------------------------------------------------------------------------------------------------
+# Protection (P) and protection-related (R)
+# -----------------------------------------------------------------------------------------------------
+- id: ln.ptoc
+  terms: [PTOC, time overcurrent, overcurrent]
+  title: "PTOC: time overcurrent protection"
+  summary: >-
+    Trips when current stays above a threshold for a set time (fixed or depending on how high the
+    current is). `Str` shows the start (pickup), `Op` the operation.
+  related: [ln.pioc, ln.ptrc, cdc.acd, cdc.act, cdc.curve]
+
+- id: ln.pioc
+  terms: [PIOC, instantaneous overcurrent]
+  title: "PIOC: instantaneous overcurrent protection"
+  summary: Trips without intentional delay when current exceeds a high threshold.
+  related: [ln.ptoc, ln.ptrc]
+
+- id: ln.pdis
+  terms: [PDIS, distance protection]
+  title: "PDIS: distance protection"
+  summary: >-
+    Measures impedance to decide whether a fault lies within a protected zone of a line; usually one
+    instance per zone.
+  related: [ln.ptrc, ln.rdir]
+
+- id: ln.pdif
+  terms: [PDIF, differential protection]
+  title: "PDIF: differential protection"
+  summary: >-
+    Compares currents entering and leaving a protected object (line, transformer, busbar) and trips
+    when they differ too much.
+  related: [ln.ptrc]
+
+- id: ln.ptrc
+  terms: [PTRC, trip conditioning, trip]
+  title: "PTRC: trip conditioning"
+  summary: >-
+    Collects the operate signals of protection functions and forms the trip command to the breaker
+    (`Tr`), with the overall operate (`Op`).
+  related: [ln.ptoc, ln.pdis, add-cause:abortion-by-trip]
+
+- id: ln.ptov
+  terms: [PTOV, overvoltage]
+  title: "PTOV: overvoltage protection"
+  summary: Operates when voltage stays above a threshold for a set time.
+  related: [ln.ptuv]
+
+- id: ln.ptuv
+  terms: [PTUV, undervoltage]
+  title: "PTUV: undervoltage protection"
+  summary: Operates when voltage stays below a threshold for a set time.
+  related: [ln.ptov]
+
+- id: ln.ptof
+  terms: [PTOF, overfrequency]
+  title: "PTOF: overfrequency protection"
+  summary: Operates when frequency stays above a threshold for a set time.
+  related: [ln.ptuf]
+
+- id: ln.ptuf
+  terms: [PTUF, underfrequency]
+  title: "PTUF: underfrequency protection"
+  summary: Operates when frequency stays below a threshold, for example for load shedding.
+  related: [ln.ptof]
+
+- id: ln.pttr
+  terms: [PTTR, thermal overload]
+  title: "PTTR: thermal overload protection"
+  summary: Estimates the heating of the protected equipment from its current and trips before it overheats.
+  related: [ln.ptoc]
+
+- id: ln.rrec
+  terms: [RREC, autoreclose, auto-reclose, recloser]
+  title: "RREC: autoreclosing"
+  summary: >-
+    Closes the breaker again automatically after a protection trip, so that brief faults do not
+    cause a lasting outage.
+  details: |
+    A manual control of the breaker usually blocks or resets the reclose sequence; the reclose
+    status shows whether a sequence is in progress.
+  related: [ln.xcbr, ln.ptrc]
+
+- id: ln.rbrf
+  terms: [RBRF, breaker failure]
+  title: "RBRF: breaker failure protection"
+  summary: >-
+    Detects a breaker that did not clear a fault after a trip and trips the surrounding breakers
+    instead.
+  related: [ln.ptrc, ln.xcbr]
+
+- id: ln.rsyn
+  terms: [RSYN]
+  title: "RSYN: synchronism check"
+  summary: >-
+    Checks voltage, frequency and angle differences before a breaker closes between two parts of the
+    network. Common in Ed1 models; later models may use CSYN.
+  related: [ln.csyn, control.synchrocheck, add-cause:blocked-by-synchrocheck]
+
+- id: ln.rdir
+  terms: [RDIR, directional element]
+  title: "RDIR: directional element"
+  summary: Determines the direction of a fault (towards the line or towards the busbar) for other protection functions.
+  related: [ln.ptoc, ln.pdis, cdc.acd]
+
+- id: ln.rdre
+  terms: [RDRE, disturbance recorder, COMTRADE]
+  title: "RDRE: disturbance recorder"
+  summary: >-
+    Records current and voltage waveforms around a fault. The recordings are files (usually
+    COMTRADE) that can be listed and downloaded with `files ls` and `files get`.
+  related: [concept.file-services, ln.rflo]
+
+- id: ln.rflo
+  terms: [RFLO, fault locator]
+  title: "RFLO: fault locator"
+  summary: Estimates the distance to a fault on a line.
+  related: [ln.pdis, ln.rdre]
+
+# -----------------------------------------------------------------------------------------------------
+# Measurement and metering (M)
+# -----------------------------------------------------------------------------------------------------
+- id: ln.mmxu
+  terms: [MMXU, measurement]
+  title: "MMXU: three-phase measurement"
+  summary: >-
+    Operational measurements of a three-phase circuit: currents, voltages, power, power factor and
+    frequency, per phase and in total.
+  related: [cdc.wye, cdc.del, cdc.mv, fc.mx, ln.mmxn]
+
+- id: ln.mmxn
+  terms: [MMXN, single-phase measurement]
+  title: "MMXN: non-three-phase measurement"
+  summary: Measurements of a circuit that is not a three-phase system, such as a single-phase or DC circuit.
+  related: [ln.mmxu, cdc.mv]
+
+- id: ln.msqi
+  terms: [MSQI, sequence and imbalance]
+  title: "MSQI: sequence and imbalance"
+  summary: Positive, negative and zero sequence values and imbalance of currents and voltages.
+  related: [cdc.seq, ln.mmxu]
+
+- id: ln.mmtr
+  terms: [MMTR, metering, energy metering]
+  title: "MMTR: metering"
+  summary: Energy counters (active and reactive energy, in both directions).
+  related: [cdc.bcr]
+
+- id: ln.mhai
+  terms: [MHAI, harmonics]
+  title: "MHAI: harmonics and interharmonics"
+  summary: Harmonic content of currents and voltages.
+  related: [ln.mmxu]
+
+# -----------------------------------------------------------------------------------------------------
+# Generic (G), automatic control (A), security
+# -----------------------------------------------------------------------------------------------------
+- id: ln.ggio
+  terms: [GGIO, generic I/O]
+  title: "GGIO: generic process I/O"
+  summary: >-
+    A general-purpose container for inputs and outputs that have no more specific class, such as
+    binary indications, commands and analogue inputs.
+  details: |
+    Its data objects (e.g. `Ind1`, `SPCSO1`, `AnIn1`) say nothing about their meaning; that comes
+    from the configuration (description attributes, SCD). Read the `d` description (FC=DC) or the
+    SCD before relying on a GGIO signal.
+  related: [ln.gapc, fc.dc]
+
+- id: ln.gapc
+  terms: [GAPC, generic automatic process control]
+  title: "GAPC: generic automatic process control"
+  summary: >-
+    A general-purpose container for automation logic that has no more specific class, such as
+    user-programmed logic outputs.
+  related: [ln.ggio]
+
+- id: ln.atcc
+  terms: [ATCC, voltage regulator, tap changer controller]
+  title: "ATCC: automatic tap changer controller"
+  summary: >-
+    Keeps voltage at a target by raising or lowering the transformer tap, in automatic or manual
+    mode. Its tap commands use step-position classes that this tool does not operate in v1.
+  related: [ln.yltc, cdc.bsc]
+
+- id: ln.gsal
+  terms: [GSAL, security application, access violations]
+  title: "GSAL: generic security application"
+  summary: >-
+    Counts security-related events such as failed authentications, refused access and service
+    violations, where the device implements it.
+  details: |
+    Reading its counters before and after a refused request shows whether an access rule was
+    involved.
+  related: [cdc.sec, data-access:object-access-denied]
+
+# -----------------------------------------------------------------------------------------------------
+# Instrument transformers (T), power transformers (Y), supervision (S)
+# -----------------------------------------------------------------------------------------------------
+- id: ln.tctr
+  terms: [TCTR, current transformer]
+  title: "TCTR: current transformer"
+  summary: >-
+    Represents a current transformer. On a process bus it is the source of current samples (Sampled
+    Values).
+  related: [ln.tvtr, cdc.sav, scope.sampled-values]
+
+- id: ln.tvtr
+  terms: [TVTR, voltage transformer]
+  title: "TVTR: voltage transformer"
+  summary: >-
+    Represents a voltage transformer. On a process bus it is the source of voltage samples (Sampled
+    Values).
+  related: [ln.tctr, cdc.sav, scope.sampled-values]
+
+- id: ln.yptr
+  terms: [YPTR, power transformer]
+  title: "YPTR: power transformer"
+  summary: Represents a power transformer, with its supervision values such as temperatures.
+  related: [ln.yltc, ln.atcc]
+
+- id: ln.yltc
+  terms: [YLTC, tap changer]
+  title: "YLTC: tap changer"
+  summary: >-
+    Represents an on-load tap changer: tap position and end-position indications. Raising at the top
+    or lowering at the bottom is refused with step-limit.
+  related: [ln.atcc, ln.yptr, add-cause:step-limit]
+
+- id: ln.simg
+  terms: [SIMG, gas monitoring, insulation medium supervision, SF6]
+  title: "SIMG: insulation medium (gas) supervision"
+  summary: >-
+    Supervises the insulating gas of switchgear (pressure, density) and raises alarms or blocking
+    when it is too low. Low gas can block breaker operation.
+  related: [add-cause:blocked-by-process, ln.xcbr]

@@ -1,0 +1,170 @@
+# Glossary: the 19 functional constraints (codes.FCS).
+# Format: see the header of data/hints.yaml.
+#
+# "Normally writable" follows this tool's rule (codes.NORMALLY_WRITABLE_FCS: SP, SV, CF, DC, EX, BL).
+# Devices may still refuse individual attributes.
+
+version: 1
+entries:
+
+- id: fc.st
+  terms: [ST, status information]
+  title: "FC ST: status"
+  summary: >-
+    Status values maintained by the device, such as a switch position (`stVal`), its quality and
+    timestamp. Read-only by design.
+  details: |
+    Control-related status such as `origin`, `ctlNum` and `stSeld` is also ST. To change a status
+    value, operate the object or change the setting behind it; writing it directly is refused.
+  related: [fc.mx, control.stval, data-access.object-access-denied.write-status]
+
+- id: fc.mx
+  terms: [MX, measurands, measured values]
+  title: "FC MX: measured values"
+  summary: >-
+    Analogue measurements produced by the device (currents, voltages, power, frequency), with
+    quality and timestamp. Read-only by design.
+  related: [fc.st, cdc.mv, ln.mmxu]
+
+- id: fc.sp
+  terms: [SP, setpoint]
+  title: "FC SP: setting outside setting groups"
+  summary: >-
+    Settings that are not part of a setting group and can be changed directly by a client. Normally
+    writable.
+  details: |
+    Devices may still refuse writes because of access rules for the client, source-IP filtering or
+    a settings lock.
+  related: [fc.sg, fc.se, fc.cf]
+
+- id: fc.sv
+  terms: [SV, substitution]
+  title: "FC SV: substitution"
+  summary: >-
+    Attributes for replacing a value with a substitute, for example during testing (`subEna`,
+    `subVal`, `subQ`). Normally writable. Not to be confused with Sampled Values.
+  details: |
+    When substitution is enabled, the device reports the substitute value instead of the real one
+    and marks its quality as substituted.
+  related: [quality.source, scope.sampled-values]
+
+- id: fc.cf
+  terms: [CF, configuration]
+  title: "FC CF: configuration"
+  summary: >-
+    Configuration of a data object, such as `ctlModel`, `sboTimeout`, units, scaling and dead
+    bands. Normally writable, but many devices make these read-only.
+  related: [control.ctlmodel, control.sbotimeout, fc.dc]
+
+- id: fc.dc
+  terms: [DC, description]
+  title: "FC DC: description"
+  summary: Descriptive texts such as `d` (description) and `dU` (description in Unicode). Normally writable.
+  related: [fc.cf, fc.ex]
+
+- id: fc.sg
+  terms: [SG, setting group values]
+  title: "FC SG: active setting group values"
+  summary: >-
+    The values of the setting group currently in use. Read-only; change them through the setting
+    group sequence (`setgroup`).
+  related: [fc.se, sgcb.sgcb, sgcb.actsg]
+
+- id: fc.se
+  terms: [SE, setting group editable]
+  title: "FC SE: setting group values being edited"
+  summary: >-
+    The values of the setting group selected for editing (`EditSG`). Writable only inside the
+    setting group sequence, which is why plain `write` refuses them and points to `setgroup`.
+  related: [fc.sg, sgcb.editsg, sgcb.cnfedit, tool:write-se-needs-setgroup]
+
+- id: fc.sr
+  terms: [SR, service response, service tracking]
+  title: "FC SR: service tracking (Ed2)"
+  summary: >-
+    Information recorded about services performed on the device, as kept by the service tracking
+    logical node (LTRK). Read-only.
+  related: [ln.ltrk, edition.ed2]
+
+- id: fc.or
+  terms: [OR, operate received]
+  title: "FC OR: operate received (Ed2)"
+  summary: >-
+    Attributes showing that an operate command was received and accepted (`opRcvd`, `opOk`,
+    `tOpOk`). Read-only.
+  related: [control.operate-received, edition.ed2]
+
+- id: fc.bl
+  terms: [BL, blocking]
+  title: "FC BL: blocking"
+  summary: >-
+    Attributes for freezing a value so it is no longer updated (`blkEna`), for example during
+    maintenance. Normally writable.
+  related: [quality.operator-blocked]
+
+- id: fc.ex
+  terms: [EX, extended definition]
+  title: "FC EX: extended definition"
+  summary: >-
+    Namespace information saying where a non-standard class or object is defined. Treated as
+    normally writable by this tool, though clients rarely need to change it.
+  related: [concept.ldns, fc.dc]
+
+- id: fc.co
+  terms: [CO, control]
+  title: "FC CO: control"
+  summary: >-
+    The control structures of a controllable object: `Oper`, `SBO`, `SBOw` and `Cancel`. They are
+    used through the control services, not written like ordinary values.
+  details: |
+    Plain `write` refuses them; use `operate`, `select` and `cancel`. Many devices do not allow
+    reading them either.
+  related: [control.oper, control.sbo, control.sbow, control.cancel, tool:write-co-needs-operate]
+
+- id: fc.us
+  terms: [US, unicast sampled value control block, USVCB]
+  title: "FC US: unicast Sampled Values control block"
+  summary: >-
+    Control blocks for Sampled Values sent to a single receiver. Sampled Values themselves are out
+    of scope for this tool.
+  related: [fc.ms, scope.sampled-values]
+
+- id: fc.ms
+  terms: [MS, multicast sampled value control block, MSVCB]
+  title: "FC MS: multicast Sampled Values control block"
+  summary: >-
+    Control blocks for Sampled Values streams sent to many receivers. Sampled Values themselves are
+    out of scope for this tool.
+  related: [fc.us, scope.sampled-values]
+
+- id: fc.rp
+  terms: [RP, unbuffered report control block attributes]
+  title: "FC RP: unbuffered report control blocks"
+  summary: >-
+    The attributes of unbuffered report control blocks (URCB). Use `rcb` and `subscribe` rather than
+    writing them by hand.
+  related: [concept.urcb, concept.rcb, fc.br]
+
+- id: fc.br
+  terms: [BR, buffered report control block attributes]
+  title: "FC BR: buffered report control blocks"
+  summary: >-
+    The attributes of buffered report control blocks (BRCB). Use `rcb` and `subscribe` rather than
+    writing them by hand.
+  related: [concept.brcb, concept.rcb, fc.rp]
+
+- id: fc.lg
+  terms: [LG, log control block attributes]
+  title: "FC LG: log control blocks"
+  summary: >-
+    The attributes of log control blocks, which control the device's value logs. Log queries are
+    planned for a later version of this tool.
+  related: [scope.logs]
+
+- id: fc.go
+  terms: [GO, GOOSE control block attributes]
+  title: "FC GO: GOOSE control blocks"
+  summary: >-
+    The attributes of GOOSE control blocks (GoCB), which configure the GOOSE messages the device
+    publishes. GOOSE traffic itself is out of scope for this tool.
+  related: [scope.goose, ln.lgos]

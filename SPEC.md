@@ -1,6 +1,6 @@
 # mms-client — Specification
 
-**Status:** Draft 0.2 (2026-09-23)
+**Status:** Draft 0.3 (2026-09-24) — v1 implementation in progress; see decision record
 **Library:** [pyiec61850-ng](https://pypi.org/project/pyiec61850-ng/) (Python bindings for libiec61850)
 
 Requirements carry IDs (e.g. `CTL-4`) so that code, tests and reviews can refer back to them.
@@ -371,8 +371,10 @@ These are not code requirements, but the tool works best when they are followed.
 
 | # | Topic | Notes |
 |---|---|---|
-| OI-4 | Layered probe design | Detailed design of DIA-3 depends on RSK-3. |
-| OI-5 | Python version | To be pinned after RSK-4. |
+| OI-4 | Layered probe design | Implemented as raw TCP / COTP / session+presentation+ACSE+MMS-initiate probes (see `mms_client/diagnosis`). Re-validate against real IEDs (RSK-3, RSK-6). |
+| OI-5 | Python version | Pinned to CPython 3.12 (see decision record). |
+| OI-9 | ldNs → edition mapping | IDN-2 says "2007 → Ed2; later revisions → Ed2.1". Implemented as 2003 → Ed1, 2007 and 2007A → Ed2, 2007B and later → Ed2.1 (always *inferred*), because many Ed2 devices report 2007A. Confirm or correct (`core/identity.py`, `LDNS_RULES`). |
+| OI-10 | Object reference length limits (IDN-8) | Limits must be taken from the standard, not from memory; the edition-compatibility check is not yet implemented pending those values. |
 
 ## 20. Decision record
 
@@ -393,3 +395,6 @@ These are not code requirements, but the tool works best when they are followed.
 | 2026-09-23 | OI-6: snapshots have three layers (structure / configuration values / operational state) with fail / warn / info diff defaults. Snapshots are strictly read-only. GoCB/SVCB inspection deferred. |
 | 2026-09-23 | OI-7: IEC 61850 logs deferred until after the prototype. LCB attributes remain in the snapshot structure layer (reads only). |
 | 2026-09-23 | OI-8: association limits in v1 come from the quirks file and refusal classification (DIA-4). Active probing (`assoc-probe`) deferred to v2. |
+| 2026-09-24 | RSK-1 outcome: the adapter calls the libiec61850 library bundled in the pinned pyiec61850-ng wheel through ctypes instead of the SWIG wrappers, because the SWIG module holds the GIL during blocking calls and deadlocks when a report or CommandTermination arrives (reproduced). PLT-3/PLT-4 still hold: pyiec61850-ng's libiec61850 is the only stack and only `mms_client.adapter` touches it. See `docs/spikes.md`. |
+| 2026-09-24 | OI-5: Python pinned to CPython 3.12 via uv (`.python-version`); pyiec61850-ng pinned to 1.6.1.10. |
+| 2026-09-24 | A simulated IED (real libiec61850 server, scriptable behaviour, built from SCL) is part of the test suite and can be run standalone for training (`python -m tests.sim`). |
