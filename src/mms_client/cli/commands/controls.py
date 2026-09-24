@@ -12,6 +12,7 @@ from mms_client.core.controls import ControlPlan, describe_state, describe_value
 from mms_client.core.safety import ConfirmationDeclined
 
 from ..context import CliContext
+from ..errors import declined_text
 from ..registry import command
 from ..render import STYLE_ERROR, STYLE_NOTE, STYLE_OK, STYLE_REF, STYLE_WARN, Output, fmt, ms
 from ..result import EXIT_REFUSED, CommandResult, failure
@@ -115,7 +116,7 @@ def operate(ctx: CliContext, args) -> CommandResult:
     except ConfirmationDeclined as e:
         r = failure(
             codes.tool("non-interactive-no-prompt") if not s.ui.interactive else codes.tool("not-confirmed"),
-            f"{e}; nothing was sent",
+            declined_text(e),
             exit_code=EXIT_REFUSED,
             data={"plan": plan.to_json(), "sent": False},
             show_hint=not s.ui.interactive,
@@ -167,7 +168,7 @@ def select(ctx: CliContext, args) -> CommandResult:
     except ConfirmationDeclined as e:
         return failure(
             codes.tool("non-interactive-no-prompt") if not s.ui.interactive else codes.tool("not-confirmed"),
-            f"{e}; nothing was sent",
+            declined_text(e),
             exit_code=EXIT_REFUSED,
             data={"plan": plan.to_json(), "sent": False},
             show_hint=not s.ui.interactive,

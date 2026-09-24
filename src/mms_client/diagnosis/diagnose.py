@@ -23,7 +23,13 @@ from mms_client.core.results import Category, CheckResult, Status
 from mms_client.core.safety import ConfirmationDeclined, PolicyError
 from mms_client.core.session import Session
 
-from .classify import AssociationFailure, Finding, assess_association_limits, classify_association, explain_ied_connect_error
+from .classify import (
+    AssociationFailure,
+    Finding,
+    assess_association_limits,
+    classify_association,
+    explain_ied_connect_error,
+)
 from .net import check_bind_address
 from .probes import ProbeResult, run_layered_probes
 
@@ -165,7 +171,8 @@ def _quirks_for(session: Session):
     if not vendor and not model:
         return None
     try:
-        return load_quirks().lookup(vendor, model, fw)
+        # resolve(): a firmware-specific entry must not hide model-wide limits
+        return load_quirks().resolve(vendor, model, fw)
     except Exception:
         return None
 
@@ -255,7 +262,8 @@ def _run(session: Session, rep: DiagnosisReport, *, controls: bool, control_ref:
             rep.layers.append(mms)
         rep.findings.extend(assess_association_limits(failure, quirks=quirk, tool_holds_association=False))
         best = _best_finding(rep.findings)
-        text = best.text if best else f"{codes.ASSOCIATION_OUTCOMES.get(failure.outcome, failure.outcome)}: {failure.detail}"
+        label = codes.ASSOCIATION_OUTCOMES.get(failure.outcome, failure.outcome)
+        text = best.text if best else (failure.detail if failure.detail.startswith(label) else f"{label}: {failure.detail}")
         cert = best.certainty if best else "fact"
         if failure.security:
             text = (
@@ -279,6 +287,7 @@ def _run(session: Session, rep: DiagnosisReport, *, controls: bool, control_ref:
     # -- 4. association through libiec61850
     assoc = LayerOutcome("association", Status.PASS)
     rep.layers.append(assoc)
+    t_assoc = time.monotonic()
     try:
         session.connect()
         params = session.require_client().connection_params()
@@ -294,7 +303,11 @@ def _run(session: Session, rep: DiagnosisReport, *, controls: bool, control_ref:
         err = getattr(e, "error", None)
         assoc.status = Status.FAIL
         assoc.results.append(CheckResult("association", "Association through libiec61850", Status.FAIL, COMM, error=err, message=str(e)))
-        note = explain_ied_connect_error(err) if err is not None and err.domain is codes.Domain.IED else str(e)
+        note = (
+            explain_ied_connect_error(err, elapsed_s=time.monotonic() - t_assoc, timeout_s=session.connect_timeout_ms / 1000)
+            if err is not None and err.domain is codes.Domain.IED
+            else str(e)
+        )
         _stop(rep, "association", Verdict(
             f"The raw association probe was accepted, but libiec61850's association failed ({err}). {note}", "likely",
             err.key if err else None, "association"))

@@ -88,6 +88,7 @@ class IedClient:
         self._closed_cfunc = _native.ConnectionClosedCallback(self._on_closed)
         self.connected_at: float | None = None
         self.lost_at: float | None = None
+        self._released = False  # a successful release already ended the association
         _live_clients.add(self)
 
     # ------------------------------------------------------------------ connection
@@ -116,6 +117,7 @@ class IedClient:
             self.host, self.port, self.local_ip = host, port, local_ip
             self.connected_at = time.time()
             self.lost_at = None
+            self._released = False
 
     def _on_closed(self, _param: int | None, _con: int | None) -> None:
         # Connection thread. Only record the fact and notify listeners.
@@ -140,7 +142,7 @@ class IedClient:
 
     @property
     def is_connected(self) -> bool:
-        return self._con is not None and self.state == "connected"
+        return self._con is not None and not self._released and self.state == "connected"
 
     def _require(self) -> tuple[int, int]:
         con, mms = self._con, self._mms
@@ -156,6 +158,10 @@ class IedClient:
                 return codes.ied_error(1)
             err = C.c_int(0)
             L.IedConnection_release(self._con, C.byref(err))
+            if err.value == 0:
+                # libiec61850 may still report "connected" although conclude and FINISH/DISCONNECT
+                # have completed; remember it so close() does not release a second time.
+                self._released = True
             return codes.ied_error(err.value)
 
     def abort(self) -> ErrorInfo:
@@ -179,7 +185,7 @@ class IedClient:
             for ctl in list(self._controls.values()):
                 ctl._destroy()
             self._controls.clear()
-            if graceful and L.IedConnection_getState(con) == 2:
+            if graceful and not self._released and L.IedConnection_getState(con) == 2:
                 err = C.c_int(0)
                 L.IedConnection_release(con, C.byref(err))
                 if err.value != 0:

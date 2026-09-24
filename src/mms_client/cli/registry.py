@@ -99,6 +99,12 @@ class CliArgumentParser(argparse.ArgumentParser):
     def parse_args(self, args=None, namespace=None):  # type: ignore[override]
         try:
             return super().parse_args(args, namespace)
+        except argparse.ArgumentError as e:  # e.g. "unrecognized arguments" with exit_on_error=False
+            raise UsageError(str(e), self.format_usage()) from e
+
+    def parse_known_args(self, args=None, namespace=None):  # type: ignore[override]
+        try:
+            return super().parse_known_args(args, namespace)
         except argparse.ArgumentError as e:  # exit_on_error=False raises these directly
             raise UsageError(str(e), self.format_usage()) from e
 

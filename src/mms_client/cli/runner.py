@@ -19,6 +19,7 @@ from mms_client.core.results import envelope, jsonable
 
 from . import errors
 from .context import CliContext
+from .interact import TextNonInteractive
 from .options import SHELL_ALTERNATIVES, LineOptions, line_parser, split_options
 from .registry import Command, Needs, ParserExit, UsageError, group_words, resolve, top_level_words
 from .render import STYLE_NOTE, code_label
@@ -66,8 +67,11 @@ def _command_overrides(ctx: CliContext) -> Iterator[None]:
     """Apply per-command options (shell line options, --yes, --or-ident) to the session."""
     s = ctx.session
     saved_ident = None
+    ui = ctx.ui
+    if isinstance(ui, TextNonInteractive):
+        ui.messages.clear()  # the envelope carries this command's notifications only
     if s is not None:
-        s.ui = ctx.ui
+        s.ui = ui
         s.policy.yes = bool(ctx.opt("yes"))
         if ctx.line.or_ident:
             saved_ident = s.or_ident
@@ -134,7 +138,10 @@ def emit(ctx: CliContext, cmd_name: str, result: CommandResult) -> None:
         return
     out = ctx.out
     if result.text is not None:
-        result.text(out)
+        try:
+            result.text(out)
+        except Exception as e:  # a rendering bug must not lose the result or the shell
+            out.error(f"internal error while showing the result ({type(e).__name__}: {e}); `--json` shows the data")
     for w in result.warnings:
         out.warn(w)
     if not result.ok:
@@ -246,9 +253,13 @@ def run_line(ctx: CliContext, line: str) -> CommandResult | None:
         ctx.line = LineOptions()
         return result
     try:
-        if ctx.session is not None:
-            ctx.session.log.write("command", line=line, command=cmd.name, args=args_json(args))
+        before = ctx.session
+        if before is not None:
+            before.log.write("command", line=line, command=cmd.name, args=args_json(args))
         result = call(ctx, cmd, args)
+        if ctx.session is not None and ctx.session is not before:
+            # `connect` opened a new session (and log): record the line that did it
+            ctx.session.log.write("command", line=line, command=cmd.name, args=args_json(args))
         emit(ctx, cmd.name, result)
     finally:
         ctx.line = LineOptions()

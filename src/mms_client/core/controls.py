@@ -392,7 +392,8 @@ class ControlOutcome:
         }
 
 
-def _step_error(step: ControlStepResult) -> ErrorInfo:
+def step_error(step: ControlStepResult) -> ErrorInfo:
+    """The most specific code explaining a refused control step (AddCause if present, else the IED error)."""
     if step.add_cause is not None and step.add_cause.name not in ("unknown", "none"):
         return step.add_cause
     if step.ied_error.code != 0:
@@ -442,20 +443,20 @@ def execute(session: Session, plan: ControlPlan, *, confirm: bool = True, termin
             s = ctl.select()
             out.steps.append(s)
             if not s.ok:
-                out.error = _step_error(s) if s.add_cause or s.ied_error.code else codes.add_cause(3)
+                out.error = step_error(s) if s.add_cause or s.ied_error.code else codes.add_cause(3)
                 out.message = "select refused (the device returned an empty SBO value)"
                 return _finish(session, out, ctx | {"service": "select"})
         elif m == 4:
             s = ctl.select_with_value(plan.ctl_val_spec, plan.target)
             out.steps.append(s)
             if not s.ok:
-                out.error = _step_error(s)
+                out.error = step_error(s)
                 out.message = "select-with-value refused"
                 return _finish(session, out, ctx | {"service": "select"})
         s = ctl.operate(plan.ctl_val_spec, plan.target)
         out.steps.append(s)
         if not s.ok:
-            out.error = _step_error(s)
+            out.error = step_error(s)
             out.message = "operate refused"
             return _finish(session, out, ctx)
         if m in (3, 4):
@@ -528,7 +529,7 @@ def select_only(session: Session, plan: ControlPlan, *, confirm: bool = True) ->
     if step.ok:
         session.selected[plan.ref.iec()] = SelectState(plan, time.monotonic(), step)
     else:
-        session.remember_error(_step_error(step), {"service": "select", "cdc": plan.cdc}, "select refused")
+        session.remember_error(step_error(step), {"service": "select", "cdc": plan.cdc}, "select refused")
     _log_control(session, "select", None, plan=plan.to_json(), step=step.to_json())
     return step
 
@@ -549,7 +550,7 @@ def cancel(session: Session, ref_text: str, *, or_cat: int | None = None) -> Con
     step = ctl.cancel()
     session.selected.pop(ref.iec(), None)
     if not step.ok:
-        session.remember_error(_step_error(step), {"service": "cancel"}, "cancel refused")
+        session.remember_error(step_error(step), {"service": "cancel"}, "cancel refused")
     _log_control(session, "cancel", None, reference=ref.iec(), step=step.to_json())
     return step
 
@@ -685,3 +686,6 @@ def last_origin(session: Session, ref_text: str) -> dict[str, Any]:
             except UnicodeDecodeError:
                 out["orIdent_text"] = None
     return out
+
+
+_step_error = step_error  # backwards-compatible alias

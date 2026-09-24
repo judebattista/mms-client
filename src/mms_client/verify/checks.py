@@ -158,13 +158,18 @@ def self_consistency(session: Session, opts: CheckOptions) -> Iterator[CheckResu
                 error=codes.check(cid),
             )
     # 4. BRCB buffer overflow (only visible in reports)
-    seen = [sub for sub in session.subscriptions.values() if sub.cb.kind == "BRCB"]
-    brcbs = [st for st in rcb_states if st.cb.kind == "BRCB"]
-    for st in brcbs:
-        sub = next((x for x in seen if x.reference == st.cb.reference), None)
-        if sub is None:
+    for st in (s for s in rcb_states if s.cb.kind == "BRCB"):
+        seen = session.buf_ovfl_seen.get(st.cb.reference)
+        if seen is None:
             yield _r("brcb-buffer-overflow", "BRCB buffer has not overflowed", Status.NOT_RUN, COMM, subject=st.cb.reference,
                      reason="BufOvfl is only reported inside reports; subscribe to this BRCB to observe it")
+        else:
+            ovfl, when = seen
+            yield _r("brcb-buffer-overflow", "BRCB buffer has not overflowed", Status.FAIL if ovfl else Status.PASS, COMM,
+                     subject=st.cb.reference, message=("a report carried BufOvfl=TRUE: buffered events were lost"
+                                                       if ovfl else "last report carried BufOvfl=FALSE"),
+                     evidence={"seen_at": when}, error=codes.check("brcb-buffer-overflow") if ovfl else None,
+                     certainty="fact")
     # 5. writable attributes accept writes (only when requested)
     if opts.test_writes:
         yield from _write_tests(session, opts)

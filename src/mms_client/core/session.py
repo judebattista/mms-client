@@ -129,6 +129,7 @@ class Session:
         self.reference: Any = None  # verify reference in use, if any
         self.cwd: tuple[str, ...] = ()
         self.last_results: dict[str, Any] = {}  # "check" / "diagnose" -> latest report (LOG-3)
+        self.buf_ovfl_seen: dict[str, tuple[bool, float]] = {}  # BRCB -> (BufOvfl, when) from reports
 
     # ------------------------------------------------------------------ properties
     @property
@@ -151,6 +152,9 @@ class Session:
         """Open the association (checks the bind address first, NBR-2)."""
         if self.client is not None and self.client.is_connected:
             return
+        if self.client is not None:  # a lost or released association: free it before reconnecting
+            self.client.close(graceful=False)
+            self.client = None
         if self.target.local_ip:
             self._check_bind_address(self.target.local_ip)
         client = IedClient(connect_timeout_ms=self.connect_timeout_ms, request_timeout_ms=self.request_timeout_ms)
@@ -200,6 +204,10 @@ class Session:
                 + (" (connection lost)" if self.connection_lost.is_set() else "")
             )
         return self.client
+
+    def connection_params(self) -> Any:
+        """Negotiated MMS initiate parameters of the open association."""
+        return self.require_client().connection_params()
 
     @property
     def connected(self) -> bool:

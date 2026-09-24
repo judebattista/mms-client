@@ -116,6 +116,16 @@ REQUIRED_TOOL_CODES: tuple[str, ...] = (
     "restore-device-mismatch",
     # raised by mms_client.diagnosis
     "known-association-limit",
+    # raised by mms_client.cli
+    "usage-error",
+    "invalid-reference",
+    "object-not-in-model",
+    "not-connected",
+    "not-confirmed",
+    "interrupted",
+    "internal-error",
+    "inventory-invalid",
+    "local-file-error",
 )
 REQUIRED_CHECK_IDS: tuple[str, ...] = (
     "rcb-dataset-missing",

@@ -429,8 +429,14 @@ def main(argv: list[str] | None = None) -> int:
     _EventLog.echo = True
     sim = SimServer(cfg_path, opts)
     stop = threading.Event()
-    signal.signal(signal.SIGTERM, lambda *a: stop.set())
-    signal.signal(signal.SIGINT, lambda *a: stop.set())
+
+    def on_signal(*_a: object) -> None:
+        if stop.is_set():  # second signal: the orderly shutdown is stuck, leave now
+            os._exit(1)
+        stop.set()
+
+    signal.signal(signal.SIGTERM, on_signal)
+    signal.signal(signal.SIGINT, on_signal)
     sim.start(args.port)
     print(json.dumps({"event": "ready", "port": args.port, "controls": sorted(sim.controls)}), flush=True)
     while not stop.wait(0.2):

@@ -7,13 +7,12 @@ from typing import Any
 from rich.tree import Tree
 
 from mms_client import codes
-from mms_client.adapter import ServiceError
 from mms_client.core import controls
 from mms_client.core.model import DataNode, DeviceModel, NotInModelError, Resolved, dataset_ref_to_mms
-from mms_client.core.refs import ObjectRef, RefError, ln_class_of, parse_mms, parse_ref, parse_shell_path
+from mms_client.core.refs import ObjectRef, RefError, ln_class_of, parse_ref, parse_shell_path
 
 from ..context import CliContext
-from ..registry import Needs, command
+from ..registry import command
 from ..render import STYLE_NOTE, STYLE_REF, Output
 from ..result import CommandResult, failure
 from ._common import summary_of
@@ -120,8 +119,10 @@ def ls(ctx: CliContext, args) -> CommandResult:
             )
         else:
             out.table(
-                ["name", "kind", "FC: type"],
-                [(e["name"], KIND_NAMES.get(e["kind"], e["kind"]), "  ".join(f"[{fc}] {t}" for fc, t in e.get("fcs", {}).items())) for e in entries],
+                ["name", "kind", "FC", "type"],
+                [(e["name"], KIND_NAMES.get(e["kind"], e["kind"]), ",".join(e.get("fcs", {})),
+                  "  ".join(dict.fromkeys(e.get("fcs", {}).values())) if e["kind"] == "attr" else "")
+                 for e in entries],
             )
         if data.get("control_blocks"):
             out.line("Control blocks: " + ", ".join(f"{c['name']} ({c['kind']})" for c in data["control_blocks"]))
@@ -148,7 +149,7 @@ def cd(ctx: CliContext, args) -> CommandResult:
         path = parse_shell_path(args.path or "/", s.cwd, model.ld_names)
     r = _resolve_path(model, path)
     if r is not None and r.kind == "data" and r.node is not None and r.node.is_leaf():
-        return failure(codes.tool("not-a-container"), f"{iec_of(path)} is an attribute, not something to `cd` into (use `read`)",
+        return failure(codes.tool("invalid-reference"), f"{iec_of(path)} is an attribute, not something to `cd` into (use `read`)",
                        exit_code=2, show_hint=False)
     if ctx.in_shell:
         ctx.prev_cwd, s.cwd = s.cwd, path
@@ -406,25 +407,17 @@ def dataset(ctx: CliContext, args) -> CommandResult:
             text=lambda out: out.table(["dataset", "MMS name"], [(i["reference"], i["mms"]) for i in items], title="Datasets"),
         )
     domain, item = find_dataset(model, s.cwd, args.name)
-    try:
-        members, deletable = s.require_client().get_dataset_directory(domain, item)
-    except ServiceError as e:
-        s.remember_error(e.error, {"service": "dataset"}, str(e))
-        raise
+    from mms_client.core.datasets import dataset_members
+
+    info = dataset_members(s, f"{domain}/{item}")
+    deletable = info.deletable
     rows = []
-    for i, m in enumerate(members):
-        entry: dict[str, Any] = {"index": i, "mms": m.mms_ref(), "reference": None, "fc": None, "resolves": False}
-        try:
-            ref = parse_mms(f"{m.domain}/{m.item}")
-            entry["reference"], entry["fc"] = ref.iec(), ref.fc
-            if ref.path:
-                _, spec = model.resolve_fc(ref)
-                entry["type"] = spec.type_name()
-            else:
-                model.resolve(ref)
-            entry["resolves"] = True
-        except RefError as e:
-            entry["reason"] = str(e)
+    for i, m in enumerate(info.members):
+        entry: dict[str, Any] = {"index": i, "mms": m.member.mms_ref(), "reference": m.reference, "fc": m.fc, "resolves": m.resolves}
+        if m.type_name:
+            entry["type"] = m.type_name
+        if m.problem:
+            entry["reason"] = m.problem
         rows.append(entry)
     ref_text = f"{domain}/{item.replace('$', '.')}"
     unresolved = [r for r in rows if not r["resolves"]]

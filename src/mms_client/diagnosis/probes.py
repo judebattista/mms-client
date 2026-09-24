@@ -116,87 +116,51 @@ def ping(host: str, timeout: float = 1.0, *, local_ip: str | None = None) -> Pro
     must not treat it as fatal (many IEDs drop ICMP).
     """
     t0 = time.monotonic()
+    raw: dict[str, Any] = {}
+
+    def result(ok: bool | None, outcome: str, detail: str) -> ProbeResult:
+        return ProbeResult("network", "icmp", ok, outcome, time.monotonic() - t0, detail, raw=raw)
+
     exe = shutil.which("ping")
     if exe is None:
-        return ProbeResult(
-            "network", "icmp", None, "unavailable", 0.0, "ICMP not tested: no 'ping' command found"
-        )
+        return result(None, "unavailable", "ICMP not tested: no 'ping' command found")
     wait = max(1, math.ceil(timeout))
     cmd = [exe, "-n", "-c", "1", "-W", str(wait)]
     if local_ip:
         cmd += ["-I", local_ip]
     cmd.append(host)
+    raw["command"] = " ".join(cmd)
     env = dict(os.environ, LC_ALL="C", LANG="C")
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=wait + 3, env=env, check=False)
     except subprocess.TimeoutExpired:
-        return ProbeResult(
-            "network",
-            "icmp",
-            None,
-            "error",
-            time.monotonic() - t0,
-            "ICMP not tested: ping did not finish in time",
-        )
+        return result(None, "error", "ICMP not tested: ping did not finish in time")
     except OSError as e:
-        return ProbeResult(
-            "network", "icmp", None, "unavailable", time.monotonic() - t0, f"ICMP not tested: {e}"
-        )
-    dt = time.monotonic() - t0
+        return result(None, "unavailable", f"ICMP not tested: {e}")
     out = (proc.stdout + "\n" + proc.stderr).strip()
-    raw = {"command": " ".join(cmd), "returncode": proc.returncode, "output": out[-2000:]}
+    raw.update(returncode=proc.returncode, output=out[-2000:])
     low = out.lower()
     if proc.returncode == 0:
         m = re.search(r"time[=<]([\d.]+)\s*ms", out)
-        rtt = float(m.group(1)) if m else None
-        raw["rtt_ms"] = rtt
-        rtt_s = f" in {rtt} ms" if rtt is not None else ""
-        return ProbeResult(
-            "network", "icmp", True, "reply", dt, f"ICMP echo reply from {host}{rtt_s}", raw=raw
+        raw["rtt_ms"] = rtt = float(m.group(1)) if m else None
+        return result(
+            True, "reply", f"ICMP echo reply from {host}" + (f" in {rtt} ms" if rtt is not None else "")
         )
-    if "not permitted" in low or "permission denied" in low or "operation not permitted" in low:
-        return ProbeResult(
-            "network",
-            "icmp",
-            None,
-            "not-permitted",
-            dt,
-            f"ICMP not tested: ping not permitted here ({out[:120]})",
-            raw=raw,
-        )
+    if "not permitted" in low or "permission denied" in low:
+        return result(None, "not-permitted", f"ICMP not tested: ping not permitted here ({out[:120]})")
     if "unknown host" in low or "name or service not known" in low or "temporary failure in name" in low:
-        return ProbeResult(
-            "network", "icmp", None, "unknown-host", dt, f"ICMP not tested: cannot resolve {host}", raw=raw
-        )
+        return result(None, "unknown-host", f"ICMP not tested: cannot resolve {host}")
     if "unreachable" in low:
-        return ProbeResult(
-            "network",
-            "icmp",
+        return result(
             False,
             "host-unreachable",
-            dt,
             f"ICMP: destination unreachable reported for {host} (ping exit {proc.returncode}); {_NOT_CONCLUSIVE}",
-            raw=raw,
         )
     if proc.returncode == 1:
-        return ProbeResult(
-            "network",
-            "icmp",
-            False,
-            "no-reply",
-            dt,
-            f"ICMP: no echo reply from {host} within {wait} s; {_NOT_CONCLUSIVE}",
-            raw=raw,
+        return result(
+            False, "no-reply", f"ICMP: no echo reply from {host} within {wait} s; {_NOT_CONCLUSIVE}"
         )
-    return ProbeResult(
-        "network",
-        "icmp",
-        None,
-        "error",
-        dt,
-        f"ICMP not tested: ping exit {proc.returncode} ({out[:120]})",
-        raw=raw,
-    )
+    return result(None, "error", f"ICMP not tested: ping exit {proc.returncode} ({out[:120]})")
 
 
 # ---------------------------------------------------------------------------
@@ -215,102 +179,60 @@ def _open_tcp(
     host: str, port: int, timeout: float, local_ip: str | None
 ) -> tuple[socket.socket | None, ProbeResult]:
     """Connect; return the socket (or None) and the ``tcp-<port>`` ProbeResult."""
-    name = f"tcp-{port}"
     raw: dict[str, Any] = {"host": host, "port": port, "local_ip": local_ip, "timeout_s": timeout}
     t0 = time.monotonic()
+
+    def result(ok: bool | None, outcome: str, detail: str, error: ErrorInfo | None = None) -> ProbeResult:
+        if error is None and ok is False:
+            error = codes.association(outcome)
+        return ProbeResult("network", f"tcp-{port}", ok, outcome, time.monotonic() - t0, detail, error, raw)
+
     try:
-        infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
-        addr = infos[0][4]
+        addr = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)[0][4]
     except (OSError, IndexError) as e:
-        return None, ProbeResult(
-            "network", name, None, "unknown", time.monotonic() - t0, f"cannot resolve {host!r}: {e}", raw=raw
-        )
+        return None, result(None, "unknown", f"cannot resolve {host!r}: {e}")
     raw["address"] = addr[0]
+    target = f"TCP {addr[0]}:{port}"
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    if local_ip:
+        try:
+            sock.bind((local_ip, 0))
+        except OSError as e:
+            sock.close()
+            raw["errno"] = e.errno
+            detail = (
+                f"cannot bind to local address {local_ip} ({_errno_text(e)}): the address is not configured "
+                "on this host, so the device was not contacted"
+            )
+            return None, result(None, "unknown", detail, codes.tool("local-address-missing"))
     try:
-        if local_ip:
-            try:
-                sock.bind((local_ip, 0))
-            except OSError as e:
-                sock.close()
-                raw["errno"] = e.errno
-                return None, ProbeResult(
-                    "network",
-                    name,
-                    None,
-                    "unknown",
-                    time.monotonic() - t0,
-                    f"cannot bind to local address {local_ip} ({_errno_text(e)}): the address is not configured on this "
-                    "host, so the device was not contacted",
-                    error=codes.tool("local-address-missing"),
-                    raw=raw,
-                )
         sock.settimeout(timeout)
         sock.connect(addr)
     except TimeoutError:
         sock.close()
-        dt = time.monotonic() - t0
-        return None, ProbeResult(
-            "network",
-            name,
-            False,
-            "tcp-timeout",
-            dt,
-            f"TCP {addr[0]}:{port}: no answer to the connection request within {timeout:g} s (SYN unanswered: host "
-            "down, filtered, or on an unreachable network)",
-            error=codes.association("tcp-timeout"),
-            raw=raw,
+        detail = (
+            f"{target}: no answer to the connection request within {timeout:g} s "
+            "(SYN unanswered: host down, filtered, or on an unreachable network)"
         )
+        return None, result(False, "tcp-timeout", detail)
     except ConnectionRefusedError as e:
         sock.close()
         raw["errno"] = e.errno
-        return None, ProbeResult(
-            "network",
-            name,
-            False,
-            "tcp-refused",
-            time.monotonic() - t0,
-            f"TCP {addr[0]}:{port}: connection refused (RST, {_errno_text(e)}): nothing listens on this port",
-            error=codes.association("tcp-refused"),
-            raw=raw,
-        )
+        detail = f"{target}: connection refused (RST, {_errno_text(e)}): nothing listens on this port"
+        return None, result(False, "tcp-refused", detail)
     except OSError as e:
         sock.close()
         raw["errno"] = e.errno
-        dt = time.monotonic() - t0
         if e.errno in _UNREACHABLE_ERRNOS:
-            return None, ProbeResult(
-                "network",
-                name,
-                False,
-                "host-unreachable",
-                dt,
-                f"TCP {addr[0]}:{port}: host unreachable ({_errno_text(e)}; no ARP reply or no route)",
-                error=codes.association("host-unreachable"),
-                raw=raw,
-            )
-        return None, ProbeResult(
-            "network",
-            name,
-            False,
-            "unknown",
-            dt,
-            f"TCP {addr[0]}:{port}: connect failed ({_errno_text(e)})",
-            error=codes.association("unknown"),
-            raw=raw,
-        )
-    dt = time.monotonic() - t0
+            detail = f"{target}: host unreachable ({_errno_text(e)}; no ARP reply or no route)"
+            return None, result(False, "host-unreachable", detail)
+        return None, result(False, "unknown", f"{target}: connect failed ({_errno_text(e)})")
     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     local = sock.getsockname()
     raw["local_address"] = f"{local[0]}:{local[1]}"
-    return sock, ProbeResult(
-        "network",
-        name,
-        True,
-        "accepted",
-        dt,
-        f"TCP {addr[0]}:{port}: connection accepted in {dt * 1000:.1f} ms (from {local[0]}:{local[1]})",
-        raw=raw,
+    ms = (time.monotonic() - t0) * 1000
+    return sock, result(
+        True, "accepted", f"{target}: connection accepted in {ms:.1f} ms (from {local[0]}:{local[1]})"
     )
 
 
@@ -504,96 +426,55 @@ def _cotp_exchange(
     """Send CR, read the answer. Returns the stream, the ``cotp`` step, and the CC (if accepted)."""
     stream = _Stream(sock)
     cr = iso.tpkt(iso.connection_request(params))
-    sent, received = [cr], []
-    raw: dict[str, Any] = {"sent": [_hex(b) for b in sent], "received": []}
+    received: list[bytes] = []
+    raw: dict[str, Any] = {"sent": [_hex(cr)]}
     t0 = time.monotonic()
-
-    def result(ok: bool, outcome: str, detail: str, pdu: iso.CotpPdu | None = None) -> ProbeResult:
-        raw["received"] = [_hex(b) for b in received]
-        if pdu is not None:
-            raw["pdu"] = pdu.to_json()
-        err = None if ok else codes.association(outcome)
-        return ProbeResult("transport", "cotp", ok, outcome, time.monotonic() - t0, detail, err, raw)
-
+    pdu: iso.CotpPdu | None = None
     try:
         stream.send(cr)
         pdu, _ = stream.recv_cotp(timeout, received)
     except _Timeout:
-        return (
-            stream,
-            result(
-                False,
-                "cotp-no-response",
-                f"no answer to the COTP connection request (CR) within {timeout:g} s",
-            ),
-            None,
+        outcome, detail = (
+            "cotp-no-response",
+            f"no answer to the COTP connection request (CR) within {timeout:g} s",
         )
     except _Closed as e:
         after = time.monotonic() - stream.t_open
-        raw["closed_after_s"] = round(after, 6)
-        raw["reset"] = e.reset
+        raw.update(closed_after_s=round(after, 6), reset=e.reset)
         if stream.buf:
             received.append(bytes(stream.buf))
-        return (
-            stream,
-            result(
-                False,
-                "tcp-closed-immediately",
-                f"TCP accepted, then {e.text} {after:.3f} s after connect, before any COTP response",
-            ),
-            None,
-        )
+        outcome = "tcp-closed-immediately"
+        detail = f"TCP accepted, then {e.text} {after:.3f} s after connect, before any COTP response"
     except IsoError as e:
         received.append(bytes(stream.buf))
         raw["looks_like_tls"] = iso.looks_like_tls(bytes(stream.buf[:3]))
-        extra = " — the reply looks like TLS" if raw["looks_like_tls"] else ""
-        return (
-            stream,
-            result(False, "cotp-invalid-response", f"COTP response not understood ({e}){extra}"),
-            None,
+        outcome = "cotp-invalid-response"
+        detail = f"COTP response not understood ({e})" + (
+            " — the reply looks like TLS" if raw["looks_like_tls"] else ""
         )
-    if pdu.code == iso.COTP_CC:
-        size = pdu.tpdu_size
-        return (
-            stream,
-            result(
-                True,
-                "accepted",
-                f"COTP CC: connection confirmed (class {pdu.class_option}, TPDU size {size or 'not stated'}, "
-                f"src-ref 0x{pdu.src_ref or 0:04x})",
-                pdu,
-            ),
-            pdu,
-        )
-    if pdu.code == iso.COTP_DR:
-        return (
-            stream,
-            result(
-                False,
-                "cotp-rejected",
-                f"COTP DR: disconnect request, reason 0x{pdu.reason:02x} {pdu.reason_name}",
-                pdu,
-            ),
-            None,
-        )
-    if pdu.code == iso.COTP_ER:
-        bad = pdu.params.get(iso.COTP_PARAM_INVALID_TPDU, b"")
-        return (
-            stream,
-            result(
-                False,
-                "cotp-rejected",
-                f"COTP ER: TPDU error, cause {pdu.reason} {pdu.reason_name}"
-                + (f", rejected TPDU header {_hex(bad)}" if bad else ""),
-                pdu,
-            ),
-            None,
-        )
-    return (
-        stream,
-        result(False, "cotp-invalid-response", f"unexpected COTP {pdu.kind} TPDU in reply to CR", pdu),
-        None,
-    )
+    else:
+        if pdu.code == iso.COTP_CC:
+            outcome = "accepted"
+            detail = (
+                f"COTP CC: connection confirmed (class {pdu.class_option}, TPDU size {pdu.tpdu_size or 'not stated'}, "
+                f"src-ref 0x{pdu.src_ref or 0:04x})"
+            )
+        elif pdu.code == iso.COTP_DR:
+            outcome = "cotp-rejected"
+            detail = f"COTP DR: disconnect request, reason 0x{pdu.reason:02x} {pdu.reason_name}"
+        elif pdu.code == iso.COTP_ER:
+            bad = pdu.params.get(iso.COTP_PARAM_INVALID_TPDU, b"")
+            outcome = "cotp-rejected"
+            detail = f"COTP ER: TPDU error, cause {pdu.reason} {pdu.reason_name}"
+            detail += f", rejected TPDU header {_hex(bad)}" if bad else ""
+        else:
+            outcome, detail = "cotp-invalid-response", f"unexpected COTP {pdu.kind} TPDU in reply to CR"
+        raw["pdu"] = pdu.to_json()
+    raw["received"] = [_hex(b) for b in received]
+    ok = outcome == "accepted"
+    err = None if ok else codes.association(outcome)
+    step = ProbeResult("transport", "cotp", ok, outcome, time.monotonic() - t0, detail, err, raw)
+    return stream, step, pdu if ok else None
 
 
 def cotp_connect(
@@ -716,11 +597,22 @@ class AssociationProbe:
         }
 
 
+# The layer each step of the association probe belongs to.
+STEP_LAYERS: dict[str, str] = {
+    "cotp-disconnect": "transport",
+    "iso-session": "session",
+    "presentation": "session",
+    "acse": "mms",
+    "mms-initiate": "mms",
+    "linger": "mms",
+    "release": "mms",
+}
+
+
 class _Assoc:
     """State of one association attempt (keeps iso_associate readable)."""
 
-    def __init__(self, host: str, port: int, local_ip: str | None, params: AssociateParams) -> None:
-        self.host, self.port, self.local_ip, self.params = host, port, local_ip, params
+    def __init__(self) -> None:
         self.steps: list[ProbeResult] = []
         self.outcome = "unknown"
         self.failed_layer: str | None = None
@@ -737,7 +629,6 @@ class _Assoc:
 
     def add(
         self,
-        layer: str,
         name: str,
         ok: bool | None,
         outcome: str,
@@ -746,6 +637,8 @@ class _Assoc:
         error: ErrorInfo | None = None,
         **raw: Any,
     ) -> ProbeResult:
+        """Append a step (its layer comes from :data:`STEP_LAYERS`); a failed step counts as a rejection."""
+        layer = STEP_LAYERS[name]
         if ok is False and error is None and outcome in codes.ASSOCIATION_OUTCOMES:
             error = codes.association(outcome)
         r = ProbeResult(layer, name, ok, outcome, time.monotonic() - t0, detail, error, raw)
@@ -756,118 +649,81 @@ class _Assoc:
 
     # -- layers above the session ---------------------------------------------------------
     def presentation(self, spdu: iso.Spdu, t0: float) -> iso.PresentationResponse | None:
-        abort = spdu.si == iso.SPDU_AB
         try:
-            ppdu = iso.parse_presentation(spdu.user_data, abort=abort)
+            ppdu = iso.parse_presentation(spdu.user_data, abort=spdu.si == iso.SPDU_AB)
         except IsoError as e:
-            self.add("session", "presentation", False, "invalid-response", t0, f"presentation PDU not understood ({e})",
-                     received=_hex(spdu.user_data))  # fmt: skip
+            detail = f"presentation PDU not understood ({e})"
+            self.add("presentation", False, "invalid-response", t0, detail, received=_hex(spdu.user_data))
             return None
         info = ppdu.to_json()
         if ppdu.kind == "CPA":
             results = ", ".join(
                 iso.PRESENTATION_CONTEXT_RESULTS.get(r, str(r)) for r, _ in ppdu.context_results
             )
-            bad = [r for r, _ in ppdu.context_results if r != 0]
-            if bad:
-                self.add("session", "presentation", False, "presentation-rejected", t0,
-                         f"presentation CPA, but a context was rejected: [{results}]", pdu=info)  # fmt: skip
+            if any(r != 0 for r, _ in ppdu.context_results):
+                detail = f"presentation CPA, but a context was rejected: [{results}]"
+                self.add("presentation", False, "presentation-rejected", t0, detail, pdu=info)
             else:
-                self.add("session", "presentation", True, "accepted", t0,
-                         f"presentation CPA: contexts [{results}]", pdu=info)  # fmt: skip
+                self.add(
+                    "presentation", True, "accepted", t0, f"presentation CPA: contexts [{results}]", pdu=info
+                )
         elif ppdu.kind == "CPR":
-            reason = (
-                f"provider-reason {ppdu.provider_reason} {ppdu.provider_reason_name}"
-                if ppdu.provider_reason is not None
-                else "no provider-reason (rejected by the user: see ACSE)"
-            )
+            if ppdu.provider_reason is not None:
+                reason = f"provider-reason {ppdu.provider_reason} {ppdu.provider_reason_name}"
+            else:
+                reason = "no provider-reason (rejected by the user: see ACSE)"
             self.add(
-                "session",
-                "presentation",
-                False,
-                "presentation-rejected",
-                t0,
-                f"presentation CPR: {reason}",
-                pdu=info,
+                "presentation", False, "presentation-rejected", t0, f"presentation CPR: {reason}", pdu=info
             )
         elif ppdu.kind == "ARP":
             name = iso.PRESENTATION_ABORT_REASONS.get(ppdu.abort_reason or 0, "?")
-            self.add("session", "presentation", False, "session-aborted", t0,
-                     f"presentation provider abort (ARP), reason {ppdu.abort_reason} {name}", pdu=info)  # fmt: skip
-        else:  # ARU
-            self.add(
-                "session", "presentation", None, "user-abort", t0, "presentation user abort (ARU)", pdu=info
-            )
+            detail = f"presentation provider abort (ARP), reason {ppdu.abort_reason} {name}"
+            self.add("presentation", False, "session-aborted", t0, detail, pdu=info)
+        else:  # ARU: the ACSE APDU inside says more
+            self.add("presentation", None, "user-abort", t0, "presentation user abort (ARU)", pdu=info)
         return ppdu
 
     def acse_layer(self, ppdu: iso.PresentationResponse, t0: float) -> iso.AcsePdu | None:
         apdu = ppdu.apdu(iso.ACSE_CONTEXT_ID)
         if apdu is None:
             if ppdu.kind == "CPA":
-                self.add(
-                    "mms", "acse", False, "invalid-response", t0, "presentation CPA without an ACSE AARE"
-                )
+                self.add("acse", False, "invalid-response", t0, "presentation CPA without an ACSE AARE")
             return None
         try:
             acse = iso.parse_acse(apdu)
         except IsoError as e:
             self.add(
-                "mms",
-                "acse",
-                False,
-                "invalid-response",
-                t0,
-                f"ACSE PDU not understood ({e})",
-                received=_hex(apdu),
+                "acse", False, "invalid-response", t0, f"ACSE PDU not understood ({e})", received=_hex(apdu)
             )
             return None
         self.acse = acse
         info = acse.to_json()
         if acse.kind == "ABRT":
-            diag = (
-                f", diagnostic {acse.abort_diagnostic} {acse.abort_diagnostic_name}"
-                if acse.abort_diagnostic
-                else ""
-            )
             src = iso.ACSE_ABORT_SOURCES.get(acse.abort_source or 0, "?")
-            self.add(
-                "mms",
-                "acse",
-                False,
-                "acse-aborted",
-                t0,
-                f"ACSE ABRT from {src} ({acse.abort_source}){diag}",
-                pdu=info,
-            )
+            detail = f"ACSE ABRT from {src} ({acse.abort_source})"
+            if acse.abort_diagnostic:
+                detail += f", diagnostic {acse.abort_diagnostic} {acse.abort_diagnostic_name}"
+            self.add("acse", False, "acse-aborted", t0, detail, pdu=info)
             return acse
         if acse.kind != "AARE":
-            self.add(
-                "mms",
-                "acse",
-                False,
-                "invalid-response",
-                t0,
-                f"unexpected ACSE {acse.kind} in reply to AARQ",
-                pdu=info,
-            )
+            detail = f"unexpected ACSE {acse.kind} in reply to AARQ"
+            self.add("acse", False, "invalid-response", t0, detail, pdu=info)
             return acse
-        diag_text = ""
+        detail = f"ACSE AARE result {acse.result} {acse.result_name}"
         if acse.diagnostic is not None:
-            diag_text = f", diagnostic acse-{acse.diagnostic_source} {acse.diagnostic} {acse.diagnostic_name}"
+            detail += f", diagnostic acse-{acse.diagnostic_source} {acse.diagnostic} {acse.diagnostic_name}"
             if acse.diagnostic_source == "service-user":
                 self.acse_diag = codes.info(codes.Domain.ACSE_DIAG, acse.diagnostic)
-        responder = f", responding AP title {acse.responding_ap_title}" if acse.responding_ap_title else ""
+        if acse.responding_ap_title:
+            detail += f", responding AP title {acse.responding_ap_title}"
         if acse.responding_ae_qualifier is not None:
-            responder += f" AE qualifier {acse.responding_ae_qualifier}"
-        text = f"ACSE AARE result {acse.result} {acse.result_name}{diag_text}{responder}"
+            detail += f" AE qualifier {acse.responding_ae_qualifier}"
         if acse.result == 0:
-            self.add("mms", "acse", True, "accepted", t0, text, pdu=info)
+            self.add("acse", True, "accepted", t0, detail, pdu=info)
         else:
-            outcome = {1: "acse-rejected-permanent", 2: "acse-rejected-transient"}.get(
-                acse.result or -1, "invalid-response"
-            )
+            outcome = {1: "acse-rejected-permanent", 2: "acse-rejected-transient"}.get(acse.result or -1)
             err = self.acse_diag if self.acse_diag and self.acse_diag.code else None
-            self.add("mms", "acse", False, outcome, t0, text, err, pdu=info)
+            self.add("acse", False, outcome or "invalid-response", t0, detail, err, pdu=info)
         return acse
 
     def mms_layer(self, acse: iso.AcsePdu, t0: float) -> None:
@@ -875,53 +731,39 @@ class _Assoc:
             return
         if acse.user_information is None:
             if acse.result == 0:
-                self.add(
-                    "mms",
-                    "mms-initiate",
-                    False,
-                    "invalid-response",
-                    t0,
-                    "AARE accepted without an MMS initiate-ResponsePDU",
-                )
+                detail = "AARE accepted without an MMS initiate-ResponsePDU"
+                self.add("mms-initiate", False, "invalid-response", t0, detail)
             return
         try:
             pdu = iso.parse_mms(acse.user_information)
         except IsoError as e:
-            self.add("mms", "mms-initiate", False, "invalid-response", t0, f"MMS PDU not understood ({e})",
-                     received=_hex(acse.user_information))  # fmt: skip
+            detail, received = f"MMS PDU not understood ({e})", _hex(acse.user_information)
+            self.add("mms-initiate", False, "invalid-response", t0, detail, received=received)
             return
         info = pdu.to_json()
         info["hex"] = _hex(acse.user_information)
         if pdu.number == 9 and pdu.initiate:
-            p = pdu.initiate
-            self.initiate = p
-            services = p.supported_services()
-            text = (
+            p = self.initiate = pdu.initiate
+            detail = (
                 f"MMS initiate-ResponsePDU: localDetailCalled (max PDU) {p.max_pdu_size}, "
                 f"maxServOutstanding calling {p.max_serv_outstanding_calling} / called {p.max_serv_outstanding_called}, "
                 f"nesting level {p.data_structure_nesting_level}, version {p.version}, "
                 f"parameter CBB {' '.join(p.parameter_cbb_names()) or '-'} ({p.parameter_cbb.hex()}), "
-                f"{len(services)} services ({p.services_supported.hex()})"
+                f"{len(p.supported_services())} services ({p.services_supported.hex()})"
             )
             if acse.result == 0:
-                self.add("mms", "mms-initiate", True, "accepted", t0, text, pdu=info)
+                self.add("mms-initiate", True, "accepted", t0, detail, pdu=info)
             else:
-                self.add("mms", "mms-initiate", None, "response-in-rejection", t0, text, pdu=info)
+                self.add("mms-initiate", None, "response-in-rejection", t0, detail, pdu=info)
         elif pdu.number == 10:
-            text = (
+            detail = (
                 f"MMS initiate-ErrorPDU: error class {pdu.error_class} {pdu.error_class_name}, "
                 f"code {pdu.error_code} {pdu.error_code_name}"
             )
-            self.add("mms", "mms-initiate", False, "initiate-error", t0, text, pdu=info)
+            self.add("mms-initiate", False, "initiate-error", t0, detail, pdu=info)
         else:
             self.add(
-                "mms",
-                "mms-initiate",
-                False,
-                "invalid-response",
-                t0,
-                f"unexpected MMS {pdu.name} in AARE",
-                pdu=info,
+                "mms-initiate", False, "invalid-response", t0, f"unexpected MMS {pdu.name} in AARE", pdu=info
             )
 
 
@@ -961,12 +803,13 @@ def iso_associate(
     if overrides:
         p = AssociateParams(**{**p.__dict__, **overrides})
     t_start = time.monotonic()
-    st = _Assoc(host, port, local_ip, p)
+    st = _Assoc()
 
     def done(ended_by: str | None = None, **kw: Any) -> AssociationProbe:
+        duration = time.monotonic() - t_start
         return AssociationProbe(
-            host, port, local_ip, st.outcome, st.failed_layer, st.steps, time.monotonic() - t_start,
-            st.initiate, st.acse_diag, st.acse, ended_by=ended_by, request=p, **kw,
+            host, port, local_ip, st.outcome, st.failed_layer, st.steps, duration, st.initiate, st.acse_diag, st.acse,
+            ended_by=ended_by, request=p, **kw,
         )  # fmt: skip
 
     sock, tcp = _open_tcp(host, port, timeout, local_ip)
@@ -986,81 +829,68 @@ def iso_associate(
     t0 = time.monotonic()
     sent: list[bytes] = []
     received: list[bytes] = []
+
+    def io(**extra: Any) -> dict[str, Any]:
+        return {"sent": [_hex(b) for b in sent], "received": [_hex(b) for b in received], **extra}
+
     try:
         _send_dt(stream, iso.association_request(p), tpdu_size, sent)
         pdu, payload = stream.recv_cotp(timeout, received)
     except _Timeout:
-        st.add("session", "iso-session", False, "initiate-no-response", t0,
-               f"no answer to the association request (session CONNECT / AARQ / initiate) within {timeout:g} s",
-               sent=[_hex(b) for b in sent])  # fmt: skip
+        detail = (
+            f"no answer to the association request (session CONNECT / AARQ / initiate) within {timeout:g} s"
+        )
+        st.add("iso-session", False, "initiate-no-response", t0, detail, **io())
         stream.close()
         return done("client-closed")
     except _Closed as e:
-        st.add("session", "iso-session", False, "initiate-no-response", t0,
-               f"{e.text} after the association request, without an answer (COTP was accepted)",
-               sent=[_hex(b) for b in sent], received=[_hex(b) for b in received], reset=e.reset)  # fmt: skip
+        detail = f"{e.text} after the association request, without an answer (COTP was accepted)"
+        st.add("iso-session", False, "initiate-no-response", t0, detail, **io(reset=e.reset))
         stream.close()
         return done("server-closed")
     except IsoError as e:
-        st.add("session", "iso-session", False, "invalid-response", t0, f"answer not understood ({e})",
-               sent=[_hex(b) for b in sent], received=[_hex(b) for b in received] + [_hex(bytes(stream.buf))])  # fmt: skip
+        received.append(bytes(stream.buf))
+        st.add("iso-session", False, "invalid-response", t0, f"answer not understood ({e})", **io())
         stream.close()
         return done("client-closed")
-    raw_io = {"sent": [_hex(b) for b in sent], "received": [_hex(b) for b in received]}
     if pdu.code != iso.COTP_DT:
-        reason = f", reason 0x{pdu.reason:02x} {pdu.reason_name}" if pdu.reason is not None else ""
-        st.add("transport", "cotp-disconnect", False, "cotp-rejected", t0,
-               f"COTP {pdu.kind} received in reply to the association request{reason}", pdu=pdu.to_json(), **raw_io)  # fmt: skip
+        detail = f"COTP {pdu.kind} received in reply to the association request"
+        if pdu.reason is not None:
+            detail += f", reason 0x{pdu.reason:02x} {pdu.reason_name}"
+        st.add("cotp-disconnect", False, "cotp-rejected", t0, detail, **io(pdu=pdu.to_json()))
         stream.close()
         return done("server-closed")
     try:
         spdu = iso.parse_spdu(payload)
     except IsoError as e:
-        st.add(
-            "session",
-            "iso-session",
-            False,
-            "invalid-response",
-            t0,
-            f"session PDU not understood ({e})",
-            **raw_io,
-        )
+        st.add("iso-session", False, "invalid-response", t0, f"session PDU not understood ({e})", **io())
         stream.close()
         return done("client-closed")
-    sinfo = spdu.to_json()
+    raw = io(spdu=spdu.to_json())
+    abbr = {iso.SPDU_AC: "AC", iso.SPDU_RF: "RF", iso.SPDU_AB: "AB"}.get(spdu.si, "?")
+    head = f"session {spdu.name} ({abbr} SPDU, SI {spdu.si})"
     if spdu.si == iso.SPDU_AC:
-        st.add("session", "iso-session", True, "accepted", t0,
-               f"session ACCEPT (AC SPDU, SI {spdu.si}), protocol version {spdu.version}", spdu=sinfo, **raw_io)  # fmt: skip
+        st.add("iso-session", True, "accepted", t0, f"{head}, protocol version {spdu.version}", **raw)
     elif spdu.si == iso.SPDU_RF:
-        st.add("session", "iso-session", False, "session-refused", t0,
-               f"session REFUSE (RF SPDU, SI {spdu.si}), reason 0x{spdu.refuse_reason or 0:02x} {spdu.refuse_reason_name}",
-               spdu=sinfo, **raw_io)  # fmt: skip
+        detail = f"{head}, reason 0x{spdu.refuse_reason or 0:02x} {spdu.refuse_reason_name}"
+        st.add("iso-session", False, "session-refused", t0, detail, **raw)
     elif spdu.si == iso.SPDU_AB:
         td = spdu.transport_disconnect
-        st.add("session", "iso-session", False, "session-aborted", t0,
-               f"session ABORT (AB SPDU, SI {spdu.si})" + (f", transport-disconnect 0x{td:02x}" if td is not None else ""),
-               spdu=sinfo, **raw_io)  # fmt: skip
+        detail = head + (f", transport-disconnect 0x{td:02x}" if td is not None else "")
+        st.add("iso-session", False, "session-aborted", t0, detail, **raw)
     else:
-        st.add("session", "iso-session", False, "invalid-response", t0,
-               f"unexpected session {spdu.name} SPDU (SI {spdu.si}) in reply to CONNECT", spdu=sinfo, **raw_io)  # fmt: skip
+        detail = f"unexpected session {spdu.name} SPDU (SI {spdu.si}) in reply to CONNECT"
+        st.add("iso-session", False, "invalid-response", t0, detail, **raw)
         stream.close()
         return done("client-closed")
 
     if spdu.user_data:
         ppdu = st.presentation(spdu, t0)
-        if ppdu is not None:
-            acse = st.acse_layer(ppdu, t0)
-            if acse is not None:
-                st.mms_layer(acse, t0)
+        acse = st.acse_layer(ppdu, t0) if ppdu is not None else None
+        if acse is not None:
+            st.mms_layer(acse, t0)
     elif spdu.si == iso.SPDU_AC:
-        st.add(
-            "session",
-            "presentation",
-            False,
-            "invalid-response",
-            t0,
-            "session ACCEPT without presentation user data",
-        )
+        st.add("presentation", False, "invalid-response", t0, "session ACCEPT without presentation user data")
 
     accepted = spdu.si == iso.SPDU_AC and st.failed_layer is None and st.initiate is not None
     if not accepted:
@@ -1078,12 +908,12 @@ def iso_associate(
     closed, how, extra = stream.wait_closed(linger_s)
     if closed:
         after = time.monotonic() - stream.t_open
-        st.add("mms", "linger", False, "accepted-then-closed", t0,
-               f"association accepted, then {how} within {linger_s:g} s", received=_hex(extra))  # fmt: skip
+        detail = f"association accepted, then {how} within {linger_s:g} s"
+        st.add("linger", False, "accepted-then-closed", t0, detail, received=_hex(extra))
         stream.close()
         return done("server-closed", closed_after_accept=True, closed_after_s=round(after, 6))
-    st.add("mms", "linger", True, "still-open", t0, f"connection still open {linger_s:g} s after acceptance",
-           **({"unexpected_data": _hex(extra)} if extra else {}))  # fmt: skip
+    detail = f"connection still open {linger_s:g} s after acceptance"
+    st.add("linger", True, "still-open", t0, detail, **({"unexpected_data": _hex(extra)} if extra else {}))
     ended = _end(stream, st, timeout, release=release)
     return done(ended, closed_after_accept=False)
 
@@ -1127,12 +957,12 @@ def _end(stream: _Stream, st: _Assoc, timeout: float, *, release: bool) -> str:
     closed, text, _ = stream.wait_closed(min(timeout, 1.0))
     steps.append(f"server {text}" if closed else "closing our side")
     stream.close()
+    # Recorded directly (not via st.add): a failed release does not change the classification.
+    raw = {"sent": [_hex(b) for b in sent], "received": [_hex(b) for b in received]}
+    duration = time.monotonic() - t0
     st.steps.append(
-        ProbeResult(
-            "mms", "release", ok, "released" if ok else how, time.monotonic() - t0, "; ".join(steps), None,
-            {"sent": [_hex(b) for b in sent], "received": [_hex(b) for b in received]},
-        )
-    )  # fmt: skip
+        ProbeResult("mms", "release", ok, "released" if ok else how, duration, "; ".join(steps), None, raw)
+    )
     return how
 
 

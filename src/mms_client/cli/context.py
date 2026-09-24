@@ -55,6 +55,7 @@ class CliContext:
         self._fixed_ui = ui
         self._interactive = stdin_is_tty() if interactive is None else interactive
         self._prompt_ui: PromptInteraction | None = None
+        self._non_interactive: dict[bool, TextNonInteractive] = {}
         self.in_shell = in_shell
         self.session: Session | None = None
         self.session_spec: str | None = None
@@ -97,7 +98,11 @@ class CliContext:
         if self._fixed_ui is not None:
             return self._fixed_ui
         if self.json or not self._interactive:
-            return TextNonInteractive(None if self.json else self.out)
+            key = bool(self.json)
+            ui = self._non_interactive.get(key)
+            if ui is None:
+                ui = self._non_interactive[key] = TextNonInteractive(None if key else self.out)
+            return ui
         if self._prompt_ui is None:
             self._prompt_ui = PromptInteraction(self.out)
         return self._prompt_ui

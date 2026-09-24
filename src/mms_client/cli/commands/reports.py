@@ -12,7 +12,7 @@ from mms_client.core.reports import NoFreeRcbError, RcbStatus, Subscription, fre
 
 from ..context import CliContext
 from ..registry import UsageError, command
-from ..render import STYLE_NOTE, STYLE_OK, STYLE_REF, STYLE_WARN, Output, fmt, yes_no
+from ..render import STYLE_NOTE, STYLE_OK, STYLE_REF, STYLE_WARN, Output, yes_no
 from ..result import EXIT_CONNECT, EXIT_REFUSED, CommandResult, failure
 
 STATE_STYLE = {"free": STYLE_OK, "enabled": STYLE_WARN, "reserved": STYLE_WARN, "owned": STYLE_WARN, "unreadable": "red"}
@@ -31,7 +31,10 @@ def rcb_rows(items: list[dict[str, Any]]) -> list[list[Any]]:
         if st["type"] == "BR":
             resv = "ResvTms=" + ("n/a" if v.get("resv_tms") is None else str(v.get("resv_tms")))
             opt = st.get("opt_flds") or []
-            buf_ovfl = "in reports" if "bufOvfl" in opt else "not reported"
+            if st.get("last_buf_ovfl") is not None:
+                buf_ovfl = Text("TRUE (last report)", style=STYLE_WARN) if st["last_buf_ovfl"] else "false (last report)"
+            else:
+                buf_ovfl = "in reports" if "bufOvfl" in opt else "not reported"
         else:
             resv = "Resv=" + yes_no(v.get("resv"))
             buf_ovfl = ""

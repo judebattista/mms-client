@@ -17,6 +17,18 @@
 `tests/unit/test_architecture.py` enforces PLT-4 (only the adapter imports pyiec61850) and ARC-1 (the CLI
 does not reach into adapter internals).
 
+## CLI (`mms_client.cli`)
+
+One command registry serves the shell and one-shot mode (CLI-6). A command is a decorated handler in
+`cli/commands/*.py` (`@command("name", "summary", area=..., needs=..., configure=..., service=...)`)
+returning a `CommandResult` (data + text renderer); `cli/runner.py` parses, prepares the session, maps
+exceptions to exit codes and raw error codes (CLI-7), adds catalogue hints (EXP-1, not with `--terse`),
+logs the command, and prints either text or the JSON envelope (ARC-3). The shell (`cli/shell.py`,
+prompt_toolkit) keeps one association, completes commands and object references from the browsed
+model, and reads lines from any iterable so it is testable without a TTY. Exit codes: 0 ok, 1 failed /
+refused by the device, 2 usage, 3 connection failed or lost, 4 refused by policy or not confirmed,
+130 Ctrl-C.
+
 ## Adapter (`mms_client.adapter`)
 
 * `_native.py` — loads the wheel's libiec61850 through the SWIG extension's handle and declares ctypes

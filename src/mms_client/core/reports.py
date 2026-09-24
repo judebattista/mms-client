@@ -57,6 +57,7 @@ class RcbStatus:
     owner_name: str | None = None
     assigned_to: list[str] = field(default_factory=list)  # clients assigned in the SCD / inventory
     expected_conf_rev: int | None = None  # from the reference (RPT-6)
+    last_buf_ovfl: bool | None = None  # BufOvfl of the last report received by this tool (BRCB)
 
     @property
     def state(self) -> str:
@@ -96,6 +97,7 @@ class RcbStatus:
             "assigned_to": self.assigned_to,
             "expected_conf_rev": self.expected_conf_rev,
             "conf_rev_mismatch": self.conf_rev_mismatch,
+            "last_buf_ovfl": self.last_buf_ovfl,
             "error": self.error.to_json() if self.error else None,
         }
 
@@ -134,6 +136,8 @@ def list_rcbs(session: Session, ln_filter: str | None = None) -> list[RcbStatus]
         except ServiceError as e:
             st.error = e.error
         st.assigned_to = assignments(session, cb)
+        seen = session.buf_ovfl_seen.get(cb.reference)
+        st.last_buf_ovfl = seen[0] if seen else None
         exp = getattr(session.reference, "rcb_conf_rev", None)
         if callable(exp):
             st.expected_conf_rev = exp(cb)
@@ -262,6 +266,8 @@ class Subscription:
                     self.gaps += gap
             self.last_seq = r.seq_num
         self.received += 1
+        if r.buf_ovfl is not None:
+            self.session.buf_ovfl_seen[self.reference] = (bool(r.buf_ovfl), r.received_at)
         view = ReportView(r, self.members, gap)
         if self.received <= 50 or gap:
             self.session.log.write("report", rcb=self.reference, report=view.to_json())

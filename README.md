@@ -40,10 +40,11 @@ uv run mms-client explain object-access-denied
 ```
 
 In the shell the model is navigable like a filesystem (`ls`, `cd /CTRL/CSWI1`, `tree`, `describe
-Pos`), references tab-complete, and the prompt shows the device, the location, the mode and the orCat:
+Pos`), references tab-complete, and the prompt shows the mode, the device, the location and the orCat
+(`[EXPERT]` in red when expert mode is on):
 
 ```
-relay-F12:/CTRL/CSWI1 [orCat=remote]> operate Pos close
+[std] relay-F12:/CTRL/CSWI1 [orCat=remote]> operate Pos close
 ```
 
 Every command is also available one-shot (`mms-client <command> <device> …`), and every command can
@@ -89,7 +90,8 @@ checks that the address exists on this machine and prints the exact `ip addr add
 
 Each session writes a JSONL log (default `~/.local/state/mms-client/sessions/`, override with
 `--log-dir` or `MMS_CLIENT_LOG_DIR`). `restore` writes back every value written in the session, newest
-first, after confirmation — controls are never replayed. `export --incident FILE` saves a
+first, after confirmation — controls are never replayed (one-shot: `restore <device> --last` or
+`--from LOG`). `export --incident FILE` saves a
 self-contained failure record (device, inventory, identity, last diagnose/check results, log
 excerpt); please keep them, they are how the explanation catalogue and the quirks file learn about
 this rack.

@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from mms_client import codes
 from mms_client.codes import ErrorInfo
 from mms_client.core.controls import parse_or_cat
 from mms_client.core.sessionlog import read_log
@@ -40,14 +39,10 @@ def orcat_override(ctx: CliContext) -> int | None:
 
 
 def step_error(step: Any) -> ErrorInfo:
-    """The most specific code of a failed control step: AddCause, else the IED error."""
-    ac = getattr(step, "add_cause", None)
-    if ac is not None and ac.name not in ("unknown", "none"):
-        return ac
-    ied = getattr(step, "ied_error", None)
-    if ied is not None and ied.code:
-        return ied
-    return ac or codes.tool("control-refused")
+    """The most specific code of a failed control step (delegates to the core)."""
+    from mms_client.core.controls import step_error as core_step_error
+
+    return core_step_error(step)
 
 
 def session_logs(ctx: CliContext) -> list[Path]:
@@ -82,3 +77,19 @@ def last_error_in(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
 
 def load_log(path: Path) -> list[dict[str, Any]]:
     return read_log(path)
+
+
+def load_reference(
+    path: str | Path, *, kind: str | None = None, ied: str | None = None, host: str | None = None, live_model: Any = None
+) -> Any:
+    """``verify.reference.Reference.load`` with file problems turned into a usage error."""
+    from mms_client.scl import SclError
+    from mms_client.verify.reference import Reference
+
+    from ..registry import UsageError
+
+    try:
+        k = kind or Reference.guess_kind(path)
+        return Reference.load(k, path, ied, live_model=live_model, host=host)
+    except (ValueError, SclError, OSError) as e:
+        raise UsageError(f"cannot use {path} as a reference: {e}") from e

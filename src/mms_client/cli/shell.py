@@ -195,13 +195,15 @@ class Shell:
         self._lost_reported = s.client
         out = self.ctx.out
         out.warn(f"the association with {s.device_name} was lost. The shell stays open; `connect` reconnects.")
+        notes: list[str] = []
         for sub in list(s.subscriptions.values()):
             try:
-                sub.stop()
-            except Exception:  # the association is gone; the notes below say what lingers
+                notes += sub.stop()
+            except Exception:  # the association is gone; the cleanup notes say what lingers
                 sub.active = False
                 s.subscriptions.pop(sub.reference, None)
-        for note in s.run_cleanups():
+        notes += s.run_cleanups()
+        for note in notes:
             out.note(f"Cleanup: {note}")
 
     def shutdown(self) -> None:

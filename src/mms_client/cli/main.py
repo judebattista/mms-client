@@ -40,15 +40,16 @@ def overall_help() -> str:
     for c in registry.all_commands():
         by_area.setdefault(c.area, []).append(c)
     for area in registry.AREAS:
-        cmds = by_area.get(area)
-        if not cmds:
+        cmds = by_area.get(area, [])
+        if not cmds and area != "Shell":
             continue
         lines.append(f"  {area}")
+        if area == "Shell":
+            lines.append(f"    {'shell':<20} Open one association and an interactive shell (CLI-1)")
         for c in cmds:
             tag = "  (shell only)" if c.shell_only else ""
-            lines.append(f"    {c.name:<20} {c.summary}{tag}")
-    lines.append("  Shell")
-    lines.append(f"    {'shell':<20} Open one association and an interactive shell (CLI-1)")
+            name = c.name + "".join(f", {a}" for a in c.aliases)
+            lines.append(f"    {name:<20} {c.summary}{tag}")
     lines += ["", global_options_help(), "", EXIT_CODES, "", "notes:"]
     lines.append("  " + GOOSE_NOTE)
     lines.append("  Standard and expert modes are a guardrail against mistakes, not access control.")
@@ -106,7 +107,7 @@ def run_shell(options: Options, rest: list[str], argv: list[str]) -> int:
     ctx = CliContext(options, in_shell=True, interactive=interactive)
     ctx.argv = ["mms-client", *argv]
     lines = None if interactive else sys.stdin
-    shell = Shell(ctx, lines=lines, echo=False if interactive else True)
+    shell = Shell(ctx, lines=lines, echo=not interactive and not options.json)
     return shell.run(rest[0] if rest else None)
 
 

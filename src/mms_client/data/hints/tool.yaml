@@ -605,3 +605,144 @@ entries:
   related: [concept.association-slots, tool:slots-probably-exhausted, tool:association-slot-occupied-by-tool]
   hint: "the association limit and slot-release time recorded for this model (shown by `diagnose`) against the clients that should be connected"
   certainty: check
+
+# -----------------------------------------------------------------------------------------------------
+# Command line (raised by mms_client.cli)
+# -----------------------------------------------------------------------------------------------------
+- id: tool.usage-error
+  keys: [tool:usage-error]
+  title: Command not understood
+  summary: >-
+    The command line could not be used as given: a missing or unknown option, a wrong number of
+    arguments, or a value that does not fit what the command expects. Nothing was sent.
+  next_checks:
+    - "Run `help <command>` for its usage"
+    - "For values, run `describe <reference>` to see the expected type"
+  related: [tool:invalid-reference, tool:write-type-unsupported]
+  hint: "The command line or a value in it does not fit the command; see `help <command>` (nothing was sent)"
+  certainty: fact
+
+- id: tool.invalid-reference
+  keys: [tool:invalid-reference]
+  title: Reference not usable here
+  summary: >-
+    The object reference could not be parsed, names something that exists under several functional
+    constraints, or points to something this command cannot use (for example `cd` into an
+    attribute).
+  details: |
+    References have the form `LD/LN.DO.DA`, for example `CTRL/CSWI1.Pos.stVal`. When the same name
+    exists under several FCs, add the FC in brackets, for example `CTRL/CSWI1.Pos.stVal [ST]`.
+    Attributes are read with `read`, not entered with `cd`.
+  next_checks:
+    - "Build the reference with `ls`, `cd` and tab completion"
+    - "Add `[FC]` when the message lists several functional constraints"
+  related: [concept.object-reference, concept.fc, tool:object-not-in-model]
+  hint: "the reference form LD/LN.DO.DA; add [FC] when the name exists under several FCs, and use `read` (not `cd`) for attributes"
+  certainty: check
+
+- id: tool.object-not-in-model
+  keys: [tool:object-not-in-model]
+  title: Object not in the device's model
+  summary: >-
+    The model the tool browsed from the device has no object with this reference. Nothing was sent.
+  details: |
+    The logical device part of a reference is the IED name followed by the LD instance (for example
+    `F12CTRL`), so a reference copied from another device or from an SCD with a different IED name
+    will not match. If the device was reconfigured since it was browsed, the cached model may be out
+    of date.
+  next_checks:
+    - "Browse with `ls` / `tree` and use tab completion"
+    - "Refresh the cached model with `ls --refresh`"
+    - "Check the logical device name, including the IED-name prefix"
+  related: [concept.object-reference, concept.logical-device, data-access:object-non-existent, check:model-object-missing]
+  hint: "the reference with `ls` (or `ls --refresh` after a reconfiguration), including the IED-name prefix of the logical device name"
+  certainty: check
+
+- id: tool.not-connected
+  keys: [tool:not-connected]
+  title: Not connected
+  summary: >-
+    There is no association with the device, or it was lost. Nothing was sent.
+  details: |
+    The shell keeps one association for the whole session. If it keeps dropping, the device may be
+    restarting, closing idle associations, or short of association slots.
+  next_checks:
+    - "Run `connect`"
+    - "If it keeps failing or dropping, run `diagnose <device>`"
+  related: [ied:not-connected, ied:connection-lost, concept.association]
+  hint: "No association is open (or it was lost); run `connect`, and `diagnose <device>` if it keeps failing"
+  certainty: fact
+
+- id: tool.not-confirmed
+  keys: [tool:not-confirmed]
+  title: Not confirmed
+  summary: The operator declined the confirmation, so nothing was sent to the device.
+  details: |
+    This is not a fault. Writes, controls and takeovers ask for confirmation according to the
+    rack's safety profile.
+  related: [concept.safety-profile]
+  hint: "The confirmation was declined, so nothing was sent"
+  certainty: fact
+
+- id: tool.interrupted
+  keys: [tool:interrupted]
+  title: Interrupted
+  summary: >-
+    The command was stopped with Ctrl-C. Report control block cleanup still ran: blocks this tool
+    enabled were disabled and changed parameters restored where the device allowed it.
+  details: |
+    Anything the cleanup could not undo, such as a lingering ResvTms reservation, is listed in the
+    cleanup report. A write or control that was already on its way to the device may have taken
+    effect; read the value to be sure.
+  next_checks:
+    - "Read the cleanup report printed on exit"
+    - "Read the value or `stVal` of anything that was being written or operated"
+  related: [tool:rcb-cleanup-incomplete, concept.report-levels]
+  hint: "Stopped with Ctrl-C; RCB cleanup still ran (see its report), and a request already sent may have taken effect"
+  certainty: fact
+
+- id: tool.internal-error
+  keys: [tool:internal-error]
+  title: Internal error in the tool
+  summary: >-
+    Something went wrong inside this tool; this is a bug, not a device problem. The traceback is in
+    the session log.
+  next_checks:
+    - "Save an incident file with `export --incident`"
+    - "Report it to the tool maintainers with the command you ran and the session log"
+  related: [code.unlisted]
+  hint: "This is a bug in the tool; the traceback is in the session log. Save an incident file (`export --incident`) and report it"
+  certainty: fact
+
+- id: tool.inventory-invalid
+  keys: [tool:inventory-invalid]
+  title: Inventory file not valid
+  summary: >-
+    The experiment inventory file does not match the expected format, so it was not used.
+  details: |
+    The message names the part of the file that is wrong. The format is described, with an example,
+    in the docstring at the top of `mms_client/inventory.py`: devices (name, IP, port, role,
+    reference, identity overrides), client relationships (client, server, source IP, RCBs) and the
+    rack's safety profile.
+  next_checks:
+    - "Fix the part named in the message"
+    - "Run `inventory validate <file>` to check the file"
+  related: [concept.acting-as-client, concept.safety-profile]
+  hint: "The inventory file does not match its format (see the docstring of `mms_client/inventory.py`); fix it and run `inventory validate`"
+  certainty: fact
+
+- id: tool.local-file-error
+  keys: [tool:local-file-error]
+  title: Local file problem
+  summary: >-
+    A file on this computer could not be read or written: it already exists, does not exist, is a
+    directory, or the operating system refused access.
+  details: |
+    This happens in commands that read or write local files, such as `files get`, `snapshot`,
+    `export` and `restore`. The device is not involved.
+  next_checks:
+    - "Check the path, and choose another name if the file already exists"
+    - "Check that the directory exists and that you may write to it"
+  related: [concept.file-services]
+  hint: "A local file could not be read or written (exists, missing, a directory, or no permission); check the path"
+  certainty: fact

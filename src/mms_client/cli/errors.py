@@ -26,12 +26,9 @@ log = logging.getLogger(__name__)
 HINT_FIELDS = ("service", "fc", "cdc", "ln_class", "mode", "edition", "ctl_model")
 
 
-class NotAvailable(Exception):
-    """A command whose engine is not part of this build yet."""
-
-    def __init__(self, command: str, needs: str) -> None:
-        self.command = command
-        super().__init__(f"`{command}` is not available yet in this build ({needs}).")
+def declined_text(exc: BaseException) -> str:
+    text = str(exc)
+    return text if "not sent" in text else f"{text}; nothing was sent"
 
 
 def from_exception(ctx: CliContext, cmd: Command | None, exc: BaseException) -> CommandResult:
@@ -43,7 +40,7 @@ def from_exception(ctx: CliContext, cmd: Command | None, exc: BaseException) -> 
         return r
     if isinstance(exc, AmbiguousFcError):
         return failure(
-            codes.tool("ambiguous-fc"),
+            codes.tool("invalid-reference"),
             str(exc),
             exit_code=EXIT_USAGE,
             data={"reference": exc.ref.iec(), "fcs": exc.fcs},
@@ -53,7 +50,7 @@ def from_exception(ctx: CliContext, cmd: Command | None, exc: BaseException) -> 
     if isinstance(exc, RefError):
         return failure(codes.tool("invalid-reference"), str(exc), exit_code=EXIT_USAGE)
     if isinstance(exc, EncodeError):
-        return failure(codes.tool("invalid-value"), str(exc), exit_code=EXIT_USAGE)
+        return failure(codes.tool("usage-error"), str(exc), exit_code=EXIT_USAGE, show_hint=False)
     if isinstance(exc, ConnectError):
         ctx_h = {"service": "associate"}
         if ctx.session is not None and ctx.session.target.local_ip:
@@ -74,18 +71,14 @@ def from_exception(ctx: CliContext, cmd: Command | None, exc: BaseException) -> 
     if isinstance(exc, ConfirmationDeclined):
         if ctx.ui.interactive:
             # The operator said no: not a fault, no hint needed.
-            return failure(codes.tool("not-confirmed"), f"{exc}; nothing was sent", exit_code=EXIT_REFUSED, show_hint=False)
-        return failure(codes.tool("non-interactive-no-prompt"), f"{exc}; nothing was sent", exit_code=EXIT_REFUSED)
+            return failure(codes.tool("not-confirmed"), declined_text(exc), exit_code=EXIT_REFUSED, show_hint=False)
+        return failure(codes.tool("non-interactive-no-prompt"), declined_text(exc), exit_code=EXIT_REFUSED)
     if isinstance(exc, InventoryError):
         return failure(codes.tool("inventory-invalid"), str(exc), exit_code=EXIT_USAGE)
-    if isinstance(exc, NotAvailable):
-        return failure(codes.tool("not-available"), str(exc), exit_code=EXIT_FAILED, show_hint=False)
-    if isinstance(exc, FileExistsError):
-        return failure(codes.tool("file-exists"), str(exc), exit_code=EXIT_USAGE, show_hint=False)
-    if isinstance(exc, FileNotFoundError):
-        return failure(codes.tool("file-not-found"), str(exc), exit_code=EXIT_USAGE, show_hint=False)
+    if isinstance(exc, FileExistsError | FileNotFoundError | IsADirectoryError):
+        return failure(codes.tool("local-file-error"), str(exc), exit_code=EXIT_USAGE, show_hint=False)
     if isinstance(exc, OSError):
-        return failure(codes.tool("os-error"), str(exc), exit_code=EXIT_FAILED, show_hint=False)
+        return failure(codes.tool("local-file-error"), str(exc), exit_code=EXIT_FAILED, show_hint=False)
     # Anything else is a bug in the tool: say so, keep the traceback in the log.
     tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
     log.debug(tb)

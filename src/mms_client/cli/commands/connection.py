@@ -158,10 +158,43 @@ def _attr_text(attr: dict[str, Any], *, is_edition: bool = False) -> Text:
     return Text(str(value))
 
 
+def _info_args(p, oneshot: bool) -> None:
+    p.add_argument("--save-identity", action="store_true",
+                   help="write the identity found into the inventory entry of this device, after confirmation (IDN-6)")
+
+
+def _save_identity(ctx: CliContext, rep) -> str:
+    """IDN-6: store vendor/model/firmware (and an operator-supplied edition) in the inventory.
+
+    An inferred edition is not written: stored in the inventory it would read as operator-supplied (IDN-3).
+    """
+    from mms_client.inventory_ops import write_back_identity
+
+    s = ctx.require_session()
+    inv = s.inventory
+    if inv is None or inv.path is None or s.target.device is None:
+        raise UsageError("--save-identity needs an inventory file that contains this device (--inventory FILE)")
+    edition = None
+    if rep.edition.confidence is Confidence.OPERATOR:
+        edition = getattr(rep.edition.value, "value", rep.edition.value)
+    s.policy.confirm_write(
+        s.ui,
+        f"Save the identity of {s.device_name} into {inv.path}?\n"
+        f"  vendor {rep.vendor.value!r}, model {rep.model.value!r}, firmware {rep.firmware.value!r}"
+        + (f", edition {edition}" if edition else " (the edition is not saved: it is not operator-supplied)")
+        + "\n  Values already in the inventory are kept.",
+    )
+    write_back_identity(inv, s.target.device.name, rep, edition=edition)
+    inv.save()
+    s.log.write("note", action="save-identity", inventory=str(inv.path), device=s.target.device.name)
+    return str(inv.path)
+
+
 @command(
     "info",
     "Identity from every source, edition with source and confidence, association parameters",
     area="Connection",
+    configure=_info_args,
     service="identify",
 )
 def info(ctx: CliContext, args) -> CommandResult:
@@ -192,6 +225,9 @@ def info(ctx: CliContext, args) -> CommandResult:
         },
     }
 
+    if args.save_identity:
+        data["saved_to"] = _save_identity(ctx, rep)
+
     def text(out: Output) -> None:
         rows = []
         for name in ("vendor", "model", "firmware", "edition"):
@@ -218,5 +254,7 @@ def info(ctx: CliContext, args) -> CommandResult:
             f"Model: {len(data['model']['logical_devices'])} logical device(s), {data['model']['logical_nodes']} logical node(s)"
             + (f", {len(model.errors)} browse error(s)" if model.errors else "")
         )
+        if data.get("saved_to"):
+            out.ok(f"Identity saved to {data['saved_to']}.")
 
     return CommandResult(data=data, text=text)

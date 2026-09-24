@@ -10,7 +10,18 @@ from mms_client.core.readwrite import ReadResult, describe_quality
 
 from ..context import CliContext
 from ..registry import UsageError, command
-from ..render import STYLE_NOTE, STYLE_REF, STYLE_WARN, Output, clock, flatten, fmt, quality_text, ref_label, value_text
+from ..render import (
+    STYLE_NOTE,
+    STYLE_REF,
+    STYLE_WARN,
+    Output,
+    clock,
+    flatten,
+    fmt,
+    quality_text,
+    ref_label,
+    value_text,
+)
 from ..result import CommandResult
 
 
@@ -37,14 +48,14 @@ def render_read(out: Output, res: ReadResult, data: dict[str, Any]) -> None:
         return  # the failure block shows the code
     rows: list[tuple[str, Any]]
     if isinstance(res.value, dict):
-        rows = [("type", data["type"])]
-        rows += [(k, v) for k, v in _read_rows(res)]
+        rows = [("type", data["type"]), ("FC", res.ref.fc), *_read_rows(res)]
     else:
         rows = [("value", value_text(res.ref.path, res.value)), ("type", data["type"]), ("FC", res.ref.fc)]
-    if data.get("quality"):
-        rows.append(("quality", quality_text(data["quality"])))
-    if res.timestamp is not None:
-        rows.append(("timestamp", str(res.timestamp)))
+    if not isinstance(res.value, dict):  # a structure shows its q and t among the components
+        if data.get("quality"):
+            rows.append(("quality", quality_text(data["quality"])))
+        if res.timestamp is not None:
+            rows.append(("timestamp", str(res.timestamp)))
     rows.append(("took", f"{res.duration_s * 1000:.1f} ms"))
     out.kv(rows)
 
