@@ -1,0 +1,144 @@
+# =====================================================================================================
+# IED client hint and explanation catalogue (IED-CLIENT-SPEC §12, EXP-1 … EXP-7)
+# =====================================================================================================
+#
+# The built-in catalogue is made of these files, loaded in this order:
+#   1. ied_client/data/hints.yaml       (this file: format description + fallbacks)
+#   2. ied_client/data/hints/*.yaml     (in file-name order: checks, control, tool)
+#   3. ied_client/data/glossary.yaml    (concepts: modelling basics, quality, editions, MMS/ACSE, scope, tool)
+#   4. ied_client/data/glossary/*.yaml  (in file-name order: cdcs, controls, fcs, ln-classes, reports)
+#   5. each protocol module's files     (its error codes), e.g. mms_protocol/data/hints/*.yaml
+# Extra files (e.g. one per experiment) can be layered on top with
+#   Catalogue.load(extra_paths=["experiments/my-rack-hints.yaml"])
+# An entry in a later file with the same `id` REPLACES the earlier entry completely.
+# Everything here is plain data: edit it without touching code. Invalid files are rejected on load
+# with a message naming the file and the entry.
+#
+# -----------------------------------------------------------------------------------------------------
+# FILE FORMAT (JSON-schema-like)
+# -----------------------------------------------------------------------------------------------------
+#
+# File = {
+#   "version": 1,                        # required; integer; the format version
+#   "entries": [Entry, ...]              # required; list
+# }
+#
+# Entry = {
+#   "id":          string,       # REQUIRED. lower case, characters [a-z0-9._+-]; unique within a file.
+#                                #   `explain <id>` shows the entry. Conventions:
+#                                #     "<domain>.<name>"             error codes, e.g. "add-cause.step-limit"
+#                                #     "<domain>.<name>.<situation>" context variants
+#                                #     "ln.xcbr", "cdc.dpc", "fc.st", "control.sbo", "rcb.resvtms", …
+#   "keys":        [string],     # error keys "<domain>:<name>" as defined in ied_client/codes.py or
+#                                #   registered by a protocol module (mms_protocol/codes.py), e.g.
+#                                #   "data-access:object-access-denied", "ied:access-denied",
+#                                #   "add-cause:blocked-by-interlocking", "association:tcp-refused",
+#                                #   "acse-diag:authentication-required", "tool:local-address-missing",
+#                                #   "check:locsta-missing". Write names, not numbers.
+#                                #   "<domain>:*" = fallback for codes of that domain without an entry.
+#                                #   One entry may list several keys (e.g. the same error as reported by
+#                                #   the IED layer, the data-access layer and the MMS layer).
+#   "terms":       [string],     # words `explain <term>` accepts, e.g. ["XCBR", "circuit breaker"].
+#                                #   Matching ignores case, spaces, dots, hyphens and underscores.
+#                                #   A term may belong to one entry only (within the built-in files).
+#   "kind":        "error" | "term" | "concept",   # default: "error" if keys are given, else "term"
+#   "title":       string,       # one line. REQUIRED, except on context variants (inherited).
+#   "summary":     string,       # one or two sentences. REQUIRED, except on context variants.
+#   "details":     string,       # longer text. Blank lines separate paragraphs; lines that start
+#                                #   with "- " are list items. Other line breaks are ignored.
+#   "next_checks": [string],     # concrete next steps, most useful first.
+#   "related":     [string],     # ids, error keys or terms: anything `explain` accepts.
+#   "hint":        string,       # ONE line, without a certainty prefix. REQUIRED when keys are given,
+#                                #   not allowed otherwise.
+#   "certainty":   "fact" | "likely" | "check",   # REQUIRED when keys are given.
+#                                #   fact   : the tool has PROVED it (e.g. the model says FC=ST, so the
+#                                #            attribute is read-only by design). Shown as is.
+#                                #            Never use it for a guess.
+#                                #   likely : shown as "Likely cause: <hint>"
+#                                #   check  : shown as "Check: <hint>"
+#   "when":        Context,      # turns the entry into a CONTEXT VARIANT of its keys: it applies only
+#                                #   when every listed field matches. Fields a variant leaves out
+#                                #   (title, summary, details, next_checks, related) are taken from
+#                                #   the context-free entry of the same key.
+#   "priority":    integer       # default 0. Compared before specificity. Use sparingly, e.g. in an
+#                                #   experiment file that must win over everything built in.
+# }
+#
+# Context = {        # each value: a string, or a list of strings meaning "any of"; "*" = any value
+#   "service":   "associate" | "identify" | "browse" | "read" | "write" | "watch" | "setgroup" |
+#                "select" | "operate" | "cancel" | "command-termination" | "get-rcb" | "set-rcb" |
+#                "subscribe" | "gi" | "file-dir" | "file-get" | "dataset",
+#   "fc":        one of ST MX SP SV CF DC SG SE SR OR BL EX CO US MS RP BR LG GO,
+#   "cdc":       e.g. "DPC", "SPC", "INC",
+#   "ln_class":  e.g. "XCBR", "CSWI",
+#   "mode":      "standard" | "expert",
+#   "edition":   "Ed1" | "Ed2" | "Ed2.1" | "unknown",
+#   "ctl_model": "status-only" | "direct-with-normal-security" | "sbo-with-normal-security" |
+#                "direct-with-enhanced-security" | "sbo-with-enhanced-security",
+#   "tags":      {name: value, ...}   # free-form facts from the caller. QUOTE "yes"/"no"/"on"/"off",
+#                                     # YAML would turn them into booleans. Tags used in this catalogue:
+#                  bound_ip:  "yes" | "no"   the association was bound to a chosen local IP (--as)
+#                  pattern:   "refused-after-abrupt-disconnect"   (DIA-4b refusal pattern)
+#                  test:      "yes" | "no"   the control command carried the Test flag
+#                  or_cat:    "bay-control" | "station-control" | "remote-control" | …
+#                  local_ip / interface / prefix   (only substituted into text, see PLACEHOLDERS)
+# }
+#
+# MATCHING: which entry gives the hint for an error in a context
+#   1. Candidates are the entries listing the error key, plus "<domain>:*" fallbacks.
+#   2. A candidate applies when every `when` condition holds. A condition on a field the tool did
+#      not supply never holds (unknown context never produces a fact).
+#   3. The applicable candidate with the highest rank wins. Rank compares, in order:
+#        a. priority (higher wins)
+#        b. an exact key beats a "<domain>:*" fallback
+#        c. specificity = number of `when` conditions (each tag counts as one)
+#        d. position: the LATER entry wins (later file, or further down the same file)
+#   Catalogue.lint() lists pairs of entries that could tie on a-c, so (d) is never relied on by
+#   accident. The built-in catalogue is kept lint-free by a unit test.
+#
+# PLACEHOLDERS: "{name}" anywhere in the text is replaced with the context field or tag of that name,
+# or shown as "<name>" when the caller did not supply it.
+#
+# WRITING RULES
+#   - Plain language for a technician who knows substations but not the standard's internals.
+#   - Own wording only: do not copy or closely paraphrase IEC 61850 text (EXP-6).
+#   - Hints are one line. Name what to do in this tool: `read`, `rcb`, `diagnose`, `authority-probe`…
+#   - Be honest about certainty (EXP-4). Vendors differ; say "often", "on many devices".
+#   - Quote strings that contain ": " or start with a backquote, "{", "[", "*", "&", "!", "%" or "@".
+# =====================================================================================================
+
+version: 1
+entries:
+
+# -----------------------------------------------------------------------------------------------------
+# Success codes (a protocol module's file adds its own)
+# -----------------------------------------------------------------------------------------------------
+- id: ctl-error.no-error
+  keys: [ctl-error:no-error]
+  title: No error
+  summary: The request completed without an error.
+  hint: "No error"
+  certainty: fact
+
+# -----------------------------------------------------------------------------------------------------
+# Fallbacks for numbers this catalogue does not know (codes.info() names them "unknown-<n>").
+# A protocol module's file replaces this entry (same id) to add its own domains.
+# -----------------------------------------------------------------------------------------------------
+- id: code.unlisted
+  keys: ["add-cause:*", "ctl-error:*"]
+  title: Code not described in the catalogue
+  summary: >-
+    The device or the protocol library returned a code that this catalogue has no entry for.
+  details: |
+    The raw number is always shown next to the name, and the session log keeps the full response.
+    Numbers outside the known tables usually come from a vendor extension or a newer library
+    version.
+
+    If you work out what the code means on this device, add an entry to an experiment catalogue
+    file (see the format description at the top of hints.yaml) so the next person gets a hint.
+  next_checks:
+    - "Look up the number in the device manual or the vendor's protocol implementation conformance statement (PICS)"
+    - "Save an incident file with `export --incident` so the case is recorded"
+  related: [add-cause:unknown, ctl-error:unknown]
+  hint: "the device documentation for this code, and add a catalogue entry once its meaning is known"
+  certainty: check
