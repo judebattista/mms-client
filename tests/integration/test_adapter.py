@@ -8,10 +8,10 @@ import time
 
 import pytest
 
-from mms_client.adapter import codec
-from mms_client.adapter.client import IedClient
-from mms_client.adapter.errors import ConnectError, EncodeError, ServiceError
-from mms_client.adapter.types import AccessError, BitString, MmsKind, UtcTime, VarSpec
+from ied_client.protocol.errors import ConnectError, EncodeError, ServiceError
+from ied_client.protocol.types import AccessError, BitString, UtcTime, ValueKind, VarSpec
+from ied_client.protocol.values import parse_text
+from mms_protocol.adapter.client import IedClient
 from tests.conftest import FIXTURES
 
 pytestmark = pytest.mark.integration
@@ -50,7 +50,7 @@ def test_browse(client):
     assert not deletable
     assert members[0].item == "GGIO1$ST$SPCSO1$stVal"
     spec = client.get_variable_spec(LD, "GGIO1")
-    assert spec.kind is MmsKind.STRUCTURE
+    assert spec.kind is ValueKind.STRUCTURE
     oper = spec.find(["CO", "SPCSO1", "Oper"])
     assert [c.name for c in oper.children][:2] == ["ctlVal", "origin"]
     assert spec.find(["MX", "AnIn1", "mag", "f"]).type_name() == "float(32)"
@@ -100,13 +100,13 @@ def test_write_paths(client):
 
 
 def test_parse_text_uses_model_type():
-    assert codec.parse_text(VarSpec(MmsKind.INTEGER, size=32), "0x10") == 16
-    assert codec.parse_text(VarSpec(MmsKind.BOOLEAN), "on") is True
-    assert codec.parse_text(VarSpec(MmsKind.FLOAT, size=32), "1.5") == 1.5
+    assert parse_text(VarSpec(ValueKind.INTEGER, size=32), "0x10") == 16
+    assert parse_text(VarSpec(ValueKind.BOOLEAN), "on") is True
+    assert parse_text(VarSpec(ValueKind.FLOAT, size=32), "1.5") == 1.5
     with pytest.raises(EncodeError):
-        codec.parse_text(VarSpec(MmsKind.INTEGER, size=8), "300")
+        parse_text(VarSpec(ValueKind.INTEGER, size=8), "300")
     with pytest.raises(EncodeError):
-        codec.parse_text(VarSpec(MmsKind.STRUCTURE, children=()), "1")
+        parse_text(VarSpec(ValueKind.STRUCTURE, children=()), "1")
 
 
 @pytest.mark.parametrize(

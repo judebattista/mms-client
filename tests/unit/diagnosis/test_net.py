@@ -6,9 +6,9 @@ import json
 
 import pytest
 
-from mms_client import codes
-from mms_client.diagnosis import net
-from mms_client.diagnosis.net import InterfaceAddress
+from ied_client import codes
+from ied_client.diagnosis import net
+from ied_client.diagnosis.net import InterfaceAddress
 
 IP_JSON = json.dumps(
     [

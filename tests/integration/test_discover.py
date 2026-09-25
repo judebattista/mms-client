@@ -6,9 +6,10 @@ import time
 
 import pytest
 
-from mms_client import codes
-from mms_client.adapter import IedClient
-from mms_client.diagnosis.discover import discover, draft_inventory
+from ied_client.diagnosis.discover import discover, draft_inventory
+from mms_protocol import codes as mms_codes
+from mms_protocol import protocol as mms
+from mms_protocol.adapter import IedClient
 from tests.conftest import FIXTURES
 from tests.sim.fixture import SimProcess
 
@@ -28,7 +29,7 @@ def sim1():
 
 def test_discover_reads_identity_and_logical_devices_and_releases(sim1):
     progress = []
-    found = discover("127.0.0.1/32", port=sim1.port, timeout_s=1.0, delay_s=0, progress=progress.append)
+    found = discover("127.0.0.1/32", protocol=mms, port=sim1.port, timeout_s=1.0, delay_s=0, progress=progress.append)
     (dev,) = found
     assert dev.tcp_open and dev.associated and dev.error is None and dev.classification is None
     assert (dev.identity.vendor, dev.identity.model, dev.identity.revision) == (
@@ -37,13 +38,13 @@ def test_discover_reads_identity_and_logical_devices_and_releases(sim1):
         "4.2.0",
     )
     assert dev.logical_devices == ["SIMCTRL"]
-    assert dev.release == codes.ied_error(0)  # conclude + ACSE release confirmed by the device
+    assert dev.release == mms_codes.ied_error(0)  # conclude + ACSE release confirmed by the device
     assert dev.duration_s < 1.0  # no wait for a request timeout after the release
     assert [(p.index, p.total) for p in progress] == [(1, 1)]
 
     # the slot (there is only one) is free straight away: a second discover succeeds too
-    (again,) = discover("127.0.0.1", port=sim1.port, timeout_s=1.0, delay_s=0)
-    assert again.associated and again.release == codes.ied_error(0)
+    (again,) = discover("127.0.0.1", protocol=mms, port=sim1.port, timeout_s=1.0, delay_s=0)
+    assert again.associated and again.release == mms_codes.ied_error(0)
 
     inv = draft_inventory(found)
     assert inv == {
@@ -71,7 +72,7 @@ def test_discover_reads_identity_and_logical_devices_and_releases(sim1):
 def test_each_association_is_released_before_the_next_host(sim1):
     """Sequential: the device sees connect/disconnect pairs, never two associations at once."""
     start = len(sim1.events)
-    discover("127.0.0.0/30", port=sim1.port, timeout_s=0.5, delay_s=0.1)  # 127.0.0.1 and 127.0.0.2
+    discover("127.0.0.0/30", protocol=mms, port=sim1.port, timeout_s=0.5, delay_s=0.1)  # 127.0.0.1 and 127.0.0.2
     time.sleep(0.2)
     evs = [e["event"] for e in sim1.events[start:] if e.get("event") in ("connect", "disconnect")]
     assert evs[:4] == ["connect", "disconnect", "connect", "disconnect"]  # TCP scan, then the association
@@ -92,10 +93,10 @@ def test_discover_classifies_a_device_with_no_free_slot(sim1):
             assert time.monotonic() < deadline
             time.sleep(0.05)
     try:
-        (dev,) = discover("127.0.0.1", port=sim1.port, timeout_s=1.0, delay_s=0)
+        (dev,) = discover("127.0.0.1", protocol=mms, port=sim1.port, timeout_s=1.0, delay_s=0)
     finally:
         held.close()
     assert dev.tcp_open and not dev.associated and dev.identity is None
-    assert dev.error == codes.ied_error(5)
+    assert dev.error == mms_codes.ied_error(5)
     assert dev.classification.outcome == "tcp-closed-immediately"
     assert draft_inventory([dev])["devices"][0]["identity"]["vendor"] is None

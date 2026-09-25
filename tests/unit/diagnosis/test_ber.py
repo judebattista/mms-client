@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from mms_client.diagnosis import ber
-from mms_client.diagnosis.ber import APPLICATION, CONTEXT, UNIVERSAL, BerError
+from mms_protocol.diagnosis import ber
+from mms_protocol.diagnosis.ber import APPLICATION, CONTEXT, UNIVERSAL, BerError
 
 
 @pytest.mark.parametrize(

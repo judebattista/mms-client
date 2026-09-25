@@ -6,8 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from mms_client.codes import FCS
-from mms_client.scl import ExpectedServer, SclDocument, expand_server, load_scl, to_libiec61850_config
+from ied_client.codes import FCS
+from ied_client.scl import ExpectedServer, SclDocument, expand_server, load_scl
+from mms_protocol.libiec_config import libiec_type_of, to_libiec61850_config
+from mms_protocol.names import MmsNaming
 
 from ._data import FIXTURES, bcu_text
 
@@ -288,10 +290,12 @@ def test_live_datasets_match_scl(live_client, bcu: ExpectedServer) -> None:
 
 
 def test_live_rcbs_match_scl(live_client, bcu: ExpectedServer) -> None:
+    names = MmsNaming()
     for rcb in bcu.rcbs:
         got = live_client.rcb(rcb.ref)
-        assert got["rptID"] == rcb.effective_rpt_id
-        assert got["datSet"] == rcb.dat_set
+        # IEC 61850-7-2: a missing RptID means the RCB's reference; libiec61850 reports its MMS name
+        assert got["rptID"] == (rcb.rpt_id or names.control_block(rcb.domain, rcb.ln_name, rcb.fc, rcb.name))
+        assert got["datSet"] == (names.dataset(rcb.dat_set_dataset) if rcb.dat_set_dataset else None)
         assert got["confRev"] == rcb.conf_rev
         assert got["trgOps"] == rcb.trg_ops
         assert got["optFlds"] == rcb.opt_fields_int
@@ -302,3 +306,22 @@ def test_live_sgcb(live_client, bcu: ExpectedServer) -> None:
     (sgcb,) = bcu.sgcbs
     assert live_client.read(f"{sgcb.domain}/LLN0.SGCB.NumOfSG", FCS["SP"]) == sgcb.num_of_sgs
     assert live_client.read(f"{sgcb.domain}/LLN0.SGCB.ActSG", FCS["SP"]) == sgcb.act_sg
+
+
+@pytest.mark.parametrize(
+    ("b_type", "number"),
+    [
+        ("BOOLEAN", 0), ("INT8", 1), ("INT16", 2), ("INT32", 3), ("INT64", 4), ("INT128", 5),
+        ("INT8U", 6), ("INT16U", 7), ("INT24U", 8), ("INT32U", 9), ("FLOAT32", 10), ("FLOAT64", 11),
+        ("Enum", 12), ("Octet64", 13), ("VisString32", 16), ("VisString64", 17), ("VisString65", 18),
+        ("VisString129", 19), ("ObjRef", 19), ("VisString255", 20), ("Unicode255", 21), ("Timestamp", 22),
+        ("Quality", 23), ("Check", 24), ("Dbpos", 25), ("Tcmd", 25), ("Struct", 27), ("EntryTime", 28),
+        ("PhyComAddr", 29), ("Currency", 30), ("OptFlds", 31), ("TrgOps", 32),
+    ],
+)
+def test_libiec_type_numbers(b_type: str, number: int) -> None:
+    assert libiec_type_of(b_type) == number
+
+
+def test_libiec_type_unknown() -> None:
+    assert libiec_type_of("NoSuchType") is None

@@ -62,7 +62,7 @@ libiec61850 reports connect failures as a handful of generic `IedClientError`s (
 presentation, ACSE AARQ and MMS initiate, parsed layer by layer) to separate transport, session, ACSE and
 MMS failures, and to detect IEC 62351 TLS (port 3782) and ACSE-authentication rejections (DIA-3, DIA-6).
 Observed libiec61850 server behaviour when its association slots are exhausted and the layers at which
-our probes see each failure are documented in `mms_client/diagnosis/classify.py` (module docstring).
+our probes see each failure are documented in `mms_protocol/diagnosis/classify.py` (module docstring).
 
 *To repeat on real IEDs:* cause failures at each layer on each model (wrong IP, port closed, slots full,
 wrong AP title, security required) and record what they return.
@@ -86,7 +86,7 @@ every 200 ms: **RSS growth 284 kB**, ~1100 operations/s over loopback.
 
 ## RSK-6 — Vendor variation — **pending real devices**
 
-No vendor IEDs were available. The quirks file (`src/mms_client/data/quirks.yaml`, IDN-9) is in place and
+No vendor IEDs were available. The quirks file (`src/mms_protocol/data/quirks.yaml`, IDN-9) is in place and
 empty, as specified. Procedure per IED model: run `diagnose`, `authority-probe` (in expert mode for all
 orCats), `rcb` + `subscribe` (note ResvTms and Owner behaviour), `setgroup show/edit`, `info` (identity
 sources and ldNs), then add an entry to the quirks file.

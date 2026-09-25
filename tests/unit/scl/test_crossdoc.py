@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from mms_client.scl import (
+from ied_client.scl import (
     SclDocument,
     SclError,
     client_relationships,

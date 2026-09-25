@@ -1,7 +1,7 @@
 """Layered probes against the simulated IED (a real libiec61850 1.6.1 server), incl. spike RSK-3.
 
 What the real server does when its association slots are exhausted is recorded here and in the
-docstring of ``mms_client.diagnosis.classify``: TCP accepted by the kernel, then the socket is
+docstring of ``mms_protocol.diagnosis.classify``: TCP accepted by the kernel, then the socket is
 closed without any ISO PDU; libiec61850's client reports only ``ied:connection-rejected (5)``.
 """
 
@@ -14,15 +14,16 @@ import time
 
 import pytest
 
-from mms_client import codes
-from mms_client.adapter import ConnectError, IedClient
-from mms_client.diagnosis import iso, probes
-from mms_client.diagnosis.classify import (
+from ied_client.protocol.errors import ConnectError
+from mms_protocol import codes as mms_codes
+from mms_protocol.adapter import IedClient
+from mms_protocol.diagnosis import iso, probes
+from mms_protocol.diagnosis.classify import (
     assess_association_limits,
     classify_association,
     explain_ied_connect_error,
 )
-from mms_client.diagnosis.probes import iso_associate
+from mms_protocol.diagnosis.probes import iso_associate
 from tests.conftest import FIXTURES
 from tests.sim.fixture import REPO, SimProcess
 
@@ -144,7 +145,7 @@ def test_slots_exhausted_behaviour_and_classification(free_slot):
         with pytest.raises(ConnectError) as ei:
             c.connect("127.0.0.1", sim.port)
         elapsed = time.monotonic() - t0
-        assert ei.value.error == codes.ied_error(5)
+        assert ei.value.error == mms_codes.ied_error(5)
         note = explain_ied_connect_error(ei.value.error, elapsed_s=elapsed, timeout_s=2.0)
         assert "does not say which layer failed" in note and "before the 2 s timeout" in note
 
@@ -180,7 +181,7 @@ def test_killed_client_frees_its_slot_quickly(free_slot):
     sim = free_slot
     code = (
         f"import sys, time; sys.path.insert(0, {str(REPO / 'src')!r})\n"
-        "from mms_client.adapter import IedClient\n"
+        "from mms_protocol.adapter import IedClient\n"
         f"c = IedClient(); c.connect('127.0.0.1', {sim.port}); print('held', flush=True); time.sleep(60)\n"
     )
     child = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True, cwd=REPO)

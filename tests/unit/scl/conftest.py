@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from mms_client.scl import ExpectedServer, SclDocument, expand_server, load_scl
+from ied_client.scl import ExpectedServer, SclDocument, expand_server, load_scl
 
 from ._data import BCU_ED2, BROKEN_REFS, IED_ED1, RACK_MIXED
 

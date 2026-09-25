@@ -6,14 +6,16 @@ import time
 
 import pytest
 
-from mms_client import codes
-from mms_client.adapter import BitString, ServiceError
-from mms_client.core import controls, files, readwrite, reports, restore, setgroup
-from mms_client.core.identity import Confidence, Edition, collect_identity
-from mms_client.core.safety import ConfirmationDeclined, Mode, Policy, PolicyError, SafetyProfile, Scripted
-from mms_client.core.session import Session, Target
-from mms_client.core.sessionlog import SessionLog
-from mms_client.inventory import ClientRelation, Device, Inventory
+from ied_client import codes
+from ied_client.core import controls, files, readwrite, reports, restore, setgroup
+from ied_client.core.identity import Confidence, Edition, collect_identity
+from ied_client.core.safety import ConfirmationDeclined, Mode, Policy, PolicyError, SafetyProfile, Scripted
+from ied_client.core.session import Session, Target
+from ied_client.core.sessionlog import SessionLog
+from ied_client.inventory import ClientRelation, Device, Inventory
+from ied_client.protocol.errors import ServiceError
+from ied_client.protocol.types import BitString
+from mms_protocol import codes as mms_codes
 
 pytestmark = pytest.mark.integration
 LD = "SIMCTRL"
@@ -31,7 +33,7 @@ def make_session(sim, answers=(), *, expert=False, safety=SafetyProfile.STRICT, 
 def test_identity_sources_and_edition(sim):
     s = make_session(sim)
     try:
-        rep = collect_identity(s.client, s.model())
+        rep = collect_identity(s.client, s.model(), protocol=s.protocol)
         assert rep.vendor.value == "SimVendor" and rep.vendor.confidence is Confidence.CONFIRMED
         assert rep.model.value == "SimIED"
         srcs = {x.source for x in rep.sources}
@@ -203,13 +205,13 @@ def test_authority_probe_matrix(sim):
 
 def test_authority_probe_stops_when_cancel_is_refused(sim, monkeypatch):
     """ORG-5 (Version-1.01): a refused Cancel leaves the object selected; later orCats are not probed."""
-    from mms_client.adapter import ControlStepResult
-    from mms_client.adapter.client import ControlObject
+    from ied_client.protocol.types import ControlStepResult
+    from mms_protocol.adapter.client import ControlObject
 
     real_cancel = ControlObject.cancel
 
     def refused(self):  # the device refuses the cancel and the object stays selected
-        return ControlStepResult(service="cancel", ok=False, duration_s=0.0, ied_error=codes.ied_error(21),
+        return ControlStepResult(service="cancel", ok=False, duration_s=0.0, ied_error=mms_codes.ied_error(21),
                                  add_cause=None, ctl_error=None, ctl_num=0)
 
     s = make_session(sim, ["authority-probe"])
@@ -228,14 +230,14 @@ def test_authority_probe_stops_when_cancel_is_refused(sim, monkeypatch):
 
 def test_unreadable_ctl_model_reports_the_devices_error(sim, monkeypatch):
     """CLI-7 (Version-1.01): the device's own error, not an invented object-does-not-exist."""
-    from mms_client.adapter import AccessError
-    from mms_client.adapter.client import IedClient
+    from ied_client.protocol.types import AccessError
+    from mms_protocol.adapter.client import IedClient
 
     real_read = IedClient.read
 
     def read(self, domain, item, spec=None):
         if item.endswith("$CF$SPCSO1$ctlModel"):
-            return AccessError(codes.data_access_error(3))
+            return AccessError(mms_codes.data_access_error(3))
         return real_read(self, domain, item, spec)
 
     s = make_session(sim)
@@ -243,7 +245,7 @@ def test_unreadable_ctl_model_reports_the_devices_error(sim, monkeypatch):
         monkeypatch.setattr(IedClient, "read", read)
         with pytest.raises(ServiceError) as ei:
             controls.plan_control(s, f"{LD}/GGIO1.SPCSO1", "true", or_cat=1)
-        assert ei.value.error == codes.data_access_error(3)
+        assert ei.value.error == mms_codes.data_access_error(3)
     finally:
         monkeypatch.setattr(IedClient, "read", real_read)
         s.close()
@@ -267,7 +269,7 @@ def test_command_termination_negative():
 
 # ------------------------------------------------------------------ reports
 def test_rcb_listing_and_subscribe_cleanup(sim, tmp_path):
-    inv = Inventory(devices=[Device("sim", "127.0.0.1")], clients=[ClientRelation("gw", "gateway-1", "sim", "127.0.0.9", [f"{LD}/LLN0.RP.urcbEvents02"])])
+    inv = Inventory(devices=[Device("sim", "127.0.0.1", 102)], clients=[ClientRelation("gw", "gateway-1", "sim", "127.0.0.9", [f"{LD}/LLN0.RP.urcbEvents02"])])
     s = make_session(sim, tmp_path=tmp_path, inventory=inv)
     try:
         rcbs = {st.cb.reference: st for st in reports.list_rcbs(s)}

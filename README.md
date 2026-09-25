@@ -9,7 +9,9 @@ An IEC 61850 MMS client for the IED test rack. It lets an operator:
 4. troubleshoot failing MMS communication, layer by layer, with explanations written for
    non-experts.
 
-The specification is [SPEC.md](SPEC.md). Operators should read
+The specification is in two parts, indexed by [SPEC.md](SPEC.md): the protocol-independent IED client
+([IED-CLIENT-SPEC.md](IED-CLIENT-SPEC.md)) and the MMS protocol module that plugs into it
+([MMS-PROTOCOL-SPEC.md](MMS-PROTOCOL-SPEC.md)). Operators should read
 [docs/safety-and-scope.md](docs/safety-and-scope.md) first: it explains the modes, the confirmations,
 and what the tool cannot see (GOOSE and Sampled Values are not MMS).
 
@@ -69,7 +71,7 @@ and raw error code; `--terse` drops the hints.
 
 ## Inventory
 
-One YAML file per experiment (full schema in `src/mms_client/inventory.py`):
+One YAML file per experiment (full schema in `src/ied_client/inventory.py`):
 
 ```yaml
 schema_version: 1
@@ -85,6 +87,8 @@ clients:
 `mms-client inventory from-scd rack.scd` drafts one from an SCD; `discover 10.0.0.0/24` drafts one from
 the network. `--as sm1` makes the tool behave like that client (its source IP, its RCBs); the tool
 checks that the address exists on this machine and prints the exact `ip addr add` command if not.
+A device may name its protocol module (`protocol: mms`, the default; `--protocol` for a bare IP);
+`mms-client --version` lists the modules installed.
 
 ## Session log, restore, incidents
 
@@ -105,12 +109,16 @@ uv run ruff check src tests
 uv run python -m tests.sim --scl tests/fixtures/scl/bcu_ed2.cid --port 10102   # a simulated IED to play with
 ```
 
-* [docs/architecture.md](docs/architecture.md) — layers, threading, why the adapter uses ctypes.
+* [docs/architecture.md](docs/architecture.md) — layers, the protocol-module contract, threading, why the
+  adapter uses ctypes, how to add a protocol module.
 * [docs/spikes.md](docs/spikes.md) — Phase 0 results (RSK-1 … RSK-6).
-* `src/mms_client/data/hints.yaml` and `glossary*` — the explanation catalogue (editable YAML).
-* `src/mms_client/data/quirks.yaml` — known vendor/model/firmware quirks (starts empty).
+* `src/ied_client/` — the protocol-independent client (CLI, core, verification, diagnosis, SCL).
+* `src/mms_protocol/` — the MMS protocol module, found through the `ied_client.protocols` entry point.
+* `src/ied_client/data/hints*`, `glossary*` and `src/mms_protocol/data/hints/` — the explanation
+  catalogue (editable YAML).
+* `src/mms_protocol/data/quirks.yaml` — known vendor/model/firmware quirks (starts empty).
 
 ## Licence
 
 libiec61850 is dual-licensed GPLv3 / commercial and pyiec61850-ng is GPLv3; this project is therefore
-GPLv3 for internal use. Distribution outside the organisation needs review (SPEC §3).
+GPLv3 for internal use. Distribution outside the organisation needs review (MMS-PROTOCOL-SPEC §1).

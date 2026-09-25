@@ -13,7 +13,7 @@ import struct
 import threading
 from collections.abc import Callable
 
-from mms_client.diagnosis import ber, iso
+from mms_protocol.diagnosis import ber, iso
 
 # --- client -> server (libiec61850 client) ---------------------------------------------------
 CAP_CR = bytes.fromhex("0300001611e00000000100c0010dc2020001c1020001")

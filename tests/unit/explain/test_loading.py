@@ -7,8 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from mms_client import codes
-from mms_client.explain import Catalogue, CatalogueError, Certainty, HintContext
+from ied_client import codes
+from ied_client.explain import Catalogue, CatalogueError, Certainty, HintContext
+from mms_protocol import codes as mms_codes
 
 
 def _write(tmp_path: Path, name: str, body: str) -> Path:
@@ -75,7 +76,7 @@ def test_extra_file_adds_a_more_specific_variant_and_later_files_win(tmp_path: P
         """,
     )
     cat = Catalogue.load(extra_paths=[first, second])
-    hint = cat.hint(codes.data_access_error(3), HintContext(service="write", fc="SP"))
+    hint = cat.hint(mms_codes.data_access_error(3), HintContext(service="write", fc="SP"))
     assert hint is not None and hint.entry_id == "rack.denied-sp"
     assert hint.render() == "Likely cause: On this rack the relays only accept setting writes from 10.0.0.20"
     # the layered variant ties with the built-in one on specificity and wins by position
@@ -99,7 +100,7 @@ def test_priority_lets_an_experiment_file_win_everywhere(tmp_path: Path) -> None
         """,
     )
     cat = Catalogue.load(extra_paths=[extra])
-    hint = cat.hint(codes.ied_error(21), HintContext(service="write", fc="ST"))
+    hint = cat.hint(mms_codes.ied_error(21), HintContext(service="write", fc="ST"))
     assert hint is not None and hint.entry_id == "rack.ip-filter"
 
 

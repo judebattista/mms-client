@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from mms_client.scl import SclDocument, SclError, edition_of, edition_of_version, expand_server, load_scl
+from ied_client.scl import SclDocument, SclError, edition_of, edition_of_version, expand_server, load_scl
 
 from ._data import bcu_text
 

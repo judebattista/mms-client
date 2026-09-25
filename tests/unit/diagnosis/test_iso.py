@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from mms_client.diagnosis import ber, iso
-from mms_client.diagnosis.ber import CONTEXT
-from mms_client.diagnosis.iso import AssociateParams, IsoError
+from mms_protocol.diagnosis import ber, iso
+from mms_protocol.diagnosis.ber import CONTEXT
+from mms_protocol.diagnosis.iso import AssociateParams, IsoError
 
 from . import fakes as f
 

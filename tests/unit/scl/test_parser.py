@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from mms_client.scl import SclDocument, SclError, load_scl
+from ied_client.scl import SclDocument, SclError, load_scl
 
 from ._data import BCU_ED2, bcu_text
 

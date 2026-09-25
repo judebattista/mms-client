@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from prompt_toolkit.document import Document
 
-from mms_client.cli.completion import ShellCompleter, complete_reference
-from mms_client.cli.shell import prompt_fragments, prompt_text
-from mms_client.core.safety import Mode
+from ied_client.cli.completion import ShellCompleter, complete_reference
+from ied_client.cli.shell import prompt_fragments, prompt_text
+from ied_client.core.safety import Mode
 
 
 def test_prompt_shows_device_path_orcat_and_mode():

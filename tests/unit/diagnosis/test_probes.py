@@ -12,9 +12,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from mms_client import codes
-from mms_client.diagnosis import iso, probes
-from mms_client.diagnosis.probes import iso_associate
+from ied_client import codes
+from ied_client.diagnosis import probe
+from mms_protocol import codes as mms_codes
+from mms_protocol.diagnosis import iso, probes
+from mms_protocol.diagnosis.probes import iso_associate
 
 from . import fakes as f
 from .fakes import FakeServer
@@ -269,7 +271,7 @@ def test_acse_rejected_permanent_authentication_required(carrier):
         a = assoc(srv.port)
         srv.join()
     assert a.outcome == "acse-rejected-permanent" and a.failed_layer == "mms"
-    assert a.acse_diagnostic == codes.info(codes.Domain.ACSE_DIAG, 14)
+    assert a.acse_diagnostic == codes.info(mms_codes.MmsDomain.ACSE_DIAG, 14)
     step = a.step("acse")
     assert step.error.key == "acse-diag:authentication-required"
     assert (
@@ -413,24 +415,24 @@ def _fake_run(returncode: int, stdout: str = "", stderr: str = ""):
 
 
 def test_ping_outcomes(monkeypatch):
-    monkeypatch.setattr(probes.shutil, "which", lambda name: "/bin/ping")
+    monkeypatch.setattr(probe.shutil, "which", lambda name: "/bin/ping")
     monkeypatch.setattr(
-        probes.subprocess, "run", _fake_run(0, "64 bytes from 10.0.0.1: icmp_seq=1 ttl=64 time=0.412 ms")
+        probe.subprocess, "run", _fake_run(0, "64 bytes from 10.0.0.1: icmp_seq=1 ttl=64 time=0.412 ms")
     )
-    r = probes.ping("10.0.0.1", 1.0)
+    r = probe.ping("10.0.0.1", 1.0)
     assert (r.ok, r.outcome, r.raw["rtt_ms"]) == (True, "reply", 0.412)
-    monkeypatch.setattr(probes.subprocess, "run", _fake_run(1, "1 packets transmitted, 0 received"))
-    r = probes.ping("10.0.0.1", 1.0)
+    monkeypatch.setattr(probe.subprocess, "run", _fake_run(1, "1 packets transmitted, 0 received"))
+    r = probe.ping("10.0.0.1", 1.0)
     assert (r.ok, r.outcome) == (False, "no-reply") and "many IEDs do not answer ping" in r.detail
     monkeypatch.setattr(
-        probes.subprocess, "run", _fake_run(1, "From 10.0.0.2 icmp_seq=1 Destination Host Unreachable")
+        probe.subprocess, "run", _fake_run(1, "From 10.0.0.2 icmp_seq=1 Destination Host Unreachable")
     )
-    assert probes.ping("10.0.0.1").outcome == "host-unreachable"
-    monkeypatch.setattr(probes.subprocess, "run", _fake_run(2, "", "ping: socket: Operation not permitted"))
-    r = probes.ping("10.0.0.1")
+    assert probe.ping("10.0.0.1").outcome == "host-unreachable"
+    monkeypatch.setattr(probe.subprocess, "run", _fake_run(2, "", "ping: socket: Operation not permitted"))
+    r = probe.ping("10.0.0.1")
     assert (r.ok, r.outcome) == (None, "not-permitted")
-    monkeypatch.setattr(probes.shutil, "which", lambda name: None)
-    assert probes.ping("10.0.0.1").ok is None
+    monkeypatch.setattr(probe.shutil, "which", lambda name: None)
+    assert probe.ping("10.0.0.1").ok is None
 
 
 def test_ping_command_line(monkeypatch):
@@ -440,14 +442,14 @@ def test_ping_command_line(monkeypatch):
         seen["cmd"] = cmd
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(probes.shutil, "which", lambda name: "/bin/ping")
-    monkeypatch.setattr(probes.subprocess, "run", run)
-    probes.ping("10.0.0.1", 0.3, local_ip="10.0.0.50")
+    monkeypatch.setattr(probe.shutil, "which", lambda name: "/bin/ping")
+    monkeypatch.setattr(probe.subprocess, "run", run)
+    probe.ping("10.0.0.1", 0.3, local_ip="10.0.0.50")
     assert seen["cmd"] == ["/bin/ping", "-n", "-c", "1", "-W", "1", "-I", "10.0.0.50", "10.0.0.1"]
 
 
 def test_ping_loopback_really():
-    r = probes.ping("127.0.0.1", 1.0)
+    r = probe.ping("127.0.0.1", 1.0)
     assert r.ok in (True, None)  # None where ping is not permitted (containers)
 
 

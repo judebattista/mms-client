@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from mms_client import codes
-from mms_client.explain import (
+from ied_client import codes
+from ied_client.explain import (
     REQUIRED_CHECK_IDS,
     REQUIRED_TOOL_CODES,
     Catalogue,
@@ -16,7 +16,8 @@ from mms_client.explain import (
     HintContext,
     default_catalogue,
 )
-from mms_client.explain.model import RESERVED_PREFIXES
+from ied_client.explain.model import RESERVED_PREFIXES
+from mms_protocol import codes as mms_codes
 
 
 @pytest.fixture(scope="module")
@@ -33,13 +34,13 @@ def test_coverage_reports_nothing_missing(cat: Catalogue) -> None:
 
 
 def _all_required_keys() -> list[str]:
-    keys = [codes.ied_error(n).key for n in codes.IED_ERRORS]
-    keys += [codes.data_access_error(n).key for n in codes.DATA_ACCESS_ERRORS]
+    keys = [mms_codes.ied_error(n).key for n in mms_codes.IED_ERRORS]
+    keys += [mms_codes.data_access_error(n).key for n in mms_codes.DATA_ACCESS_ERRORS]
     keys += [codes.add_cause(n).key for n in codes.ADD_CAUSES]
     keys += [codes.ctl_error(n).key for n in codes.CTL_ERRORS]
     keys += [codes.association(name).key for name in codes.ASSOCIATION_OUTCOMES]
-    keys += [codes.info(codes.Domain.ACSE_DIAG, n).key for n in codes.ACSE_USER_DIAGNOSTICS]
-    keys += [codes.mms_error(n).key for n in codes.MMS_ERRORS]
+    keys += [codes.info(mms_codes.MmsDomain.ACSE_DIAG, n).key for n in mms_codes.ACSE_USER_DIAGNOSTICS]
+    keys += [mms_codes.mms_error(n).key for n in mms_codes.MMS_ERRORS]
     keys += [codes.tool(name).key for name in REQUIRED_TOOL_CODES]
     keys += [codes.check(name).key for name in REQUIRED_CHECK_IDS]
     return keys
@@ -58,7 +59,8 @@ def test_every_required_code_has_its_own_hint_and_explanation(cat: Catalogue, ke
 
 
 def test_coverage_counts_all_domains(cat: Catalogue) -> None:
-    assert set(cat.coverage()) == {d.value for d in codes.Domain}
+    """The client's domains plus those the MMS module registers."""
+    assert set(cat.coverage()) == {d.value for d in codes.Domain} | {d.value for d in mms_codes.MmsDomain}
 
 
 @pytest.mark.parametrize(
@@ -71,7 +73,7 @@ def test_success_codes_have_a_trivial_fact(cat: Catalogue, key: str) -> None:
 
 def test_the_catalogue_covers_tool_and_check_codes_used_in_the_source_tree(cat: Catalogue) -> None:
     """Guard: every literal codes.tool("…") / codes.check("…") in src/ has its own catalogue entry."""
-    src = Path(__file__).resolve().parents[3] / "src" / "mms_client"
+    src = Path(__file__).resolve().parents[3] / "src" / "ied_client"
     pattern = re.compile(r'codes\.(tool|check)\(\s*"([a-z0-9-]+)"\s*\)')
     used: set[str] = set()
     for path in src.rglob("*.py"):
@@ -384,6 +386,7 @@ def test_each_context_variant_wins_in_its_own_context(cat: Catalogue) -> None:
 # is the proof (success codes, a local library state, an explicit authentication diagnostic).
 FACT_WITHOUT_CONTEXT_ALLOWED = {
     "ied.ok",
+    "ctl-error.no-error",
     "ied.not-connected",
     "ied.already-connected",
     "ied.service-not-implemented",

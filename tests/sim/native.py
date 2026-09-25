@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import ctypes as C
 
-from mms_client.adapter._native import library
+from mms_protocol.adapter._native import library
 
 vp = C.c_void_p
 cp = C.c_char_p

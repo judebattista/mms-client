@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from mms_client.adapter import IedClient
+from mms_protocol.adapter import IedClient
 
 pytestmark = [pytest.mark.integration, pytest.mark.soak]
 LD = "SIMCTRL"

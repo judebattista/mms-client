@@ -1,11 +1,11 @@
-"""bType → MMS type / libiec61850 type table."""
+"""bType → value type table (the libiec61850 type numbers are tested with the MMS module's simulator export)."""
 
 from __future__ import annotations
 
 import pytest
 
-from mms_client.scl import BTYPES, MmsType, libiec_type_of, mms_type_of
-from mms_client.scl.btypes import MMS_KINDS
+from ied_client.scl import BTYPES, ValueType, value_type_of
+from ied_client.scl.btypes import VALUE_KINDS
 
 
 @pytest.mark.parametrize(
@@ -37,32 +37,16 @@ from mms_client.scl.btypes import MMS_KINDS
         ("Struct", "structure", None),
     ],
 )
-def test_mms_type(b_type: str, kind: str, size: int | None) -> None:
-    assert mms_type_of(b_type) == MmsType(kind, size)
-
-
-@pytest.mark.parametrize(
-    ("b_type", "number"),
-    [
-        ("BOOLEAN", 0), ("INT8", 1), ("INT16", 2), ("INT32", 3), ("INT64", 4), ("INT128", 5),
-        ("INT8U", 6), ("INT16U", 7), ("INT24U", 8), ("INT32U", 9), ("FLOAT32", 10), ("FLOAT64", 11),
-        ("Enum", 12), ("Octet64", 13), ("VisString32", 16), ("VisString64", 17), ("VisString65", 18),
-        ("VisString129", 19), ("ObjRef", 19), ("VisString255", 20), ("Unicode255", 21), ("Timestamp", 22),
-        ("Quality", 23), ("Check", 24), ("Dbpos", 25), ("Tcmd", 25), ("Struct", 27), ("EntryTime", 28),
-        ("PhyComAddr", 29), ("Currency", 30), ("OptFlds", 31), ("TrgOps", 32),
-    ],
-)
-def test_libiec_type_numbers(b_type: str, number: int) -> None:
-    assert libiec_type_of(b_type) == number
+def test_value_type(b_type: str, kind: str, size: int | None) -> None:
+    assert value_type_of(b_type) == ValueType(kind, size)
 
 
 def test_arrays_and_unknown() -> None:
-    t = mms_type_of("FLOAT32", 4)
-    assert t == MmsType("array", 4, MmsType("float", 32))
+    t = value_type_of("FLOAT32", 4)
+    assert t == ValueType("array", 4, ValueType("float", 32))
     assert str(t) == "array[4] of float/32"
-    assert mms_type_of("NoSuchType") == MmsType("unknown")
-    assert libiec_type_of("NoSuchType") is None
+    assert value_type_of("NoSuchType") == ValueType("unknown")
 
 
 def test_table_uses_known_kinds() -> None:
-    assert {i.mms.kind for i in BTYPES.values()} <= MMS_KINDS
+    assert {i.value_type.kind for i in BTYPES.values()} <= VALUE_KINDS

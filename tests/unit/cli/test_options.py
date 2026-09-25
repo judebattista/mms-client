@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from mms_client.cli import runner
-from mms_client.cli.options import LineOptions, Options, global_parser, line_parser, split_options
-from mms_client.cli.registry import UsageError
+from ied_client.cli import runner
+from ied_client.cli.options import LineOptions, Options, global_parser, line_parser, split_options
+from ied_client.cli.registry import UsageError
 
 
 def test_global_options_anywhere():

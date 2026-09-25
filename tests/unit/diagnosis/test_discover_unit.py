@@ -7,9 +7,10 @@ import time
 
 import pytest
 
-from mms_client.adapter import ServerIdentity
-from mms_client.diagnosis import discover as disc
-from mms_client.diagnosis.discover import DiscoveredDevice, discover, draft_inventory, scan_targets
+from ied_client.diagnosis import discover as disc
+from ied_client.diagnosis.discover import DiscoveredDevice, discover, draft_inventory, scan_targets
+from ied_client.protocol.types import ServerIdentity
+from mms_protocol import protocol as mms
 
 from .fakes import FakeServer
 
@@ -40,7 +41,8 @@ def test_sequential_rate_limited_scan_without_association():
         t0 = time.monotonic()
         # 127.0.0.0/30 -> 127.0.0.1 (listening) and 127.0.0.2 (refused: the fake binds 127.0.0.1 only)
         found = discover(
-            "127.0.0.0/30", port=srv.port, timeout_s=0.5, delay_s=0.3, associate=False, progress=seen.append
+            "127.0.0.0/30", protocol=mms, port=srv.port, timeout_s=0.5, delay_s=0.3, associate=False,
+            progress=seen.append
         )
         elapsed = time.monotonic() - t0
     assert [d.ip for d in found] == ["127.0.0.1"] and found[0].tcp_open and found[0].identity is None
@@ -48,7 +50,7 @@ def test_sequential_rate_limited_scan_without_association():
     assert seen[1].device.tcp.outcome == "tcp-refused"
     assert elapsed >= 0.3  # the delay between hosts
     everything = discover(
-        "127.0.0.0/30", port=srv.port, timeout_s=0.5, delay_s=0, associate=False, include_closed=True
+        "127.0.0.0/30", protocol=mms, port=srv.port, timeout_s=0.5, delay_s=0, associate=False, include_closed=True
     )
     assert [d.tcp_open for d in everything] == [False, False]  # server closed by now
 
@@ -56,7 +58,7 @@ def test_sequential_rate_limited_scan_without_association():
 def test_association_failure_is_classified():
     """A responder that accepts TCP and closes at once (what a full libiec61850 server does)."""
     with FakeServer(lambda c: c.close()) as srv:
-        (dev,) = discover("127.0.0.1", port=srv.port, timeout_s=0.5, delay_s=0)
+        (dev,) = discover("127.0.0.1", protocol=mms, port=srv.port, timeout_s=0.5, delay_s=0)
     assert dev.tcp_open and not dev.associated and dev.error.key == "ied:connection-rejected"
     assert dev.classification.outcome == "tcp-closed-immediately"
     assert dev.to_json()["classification"]["outcome"] == "tcp-closed-immediately"
@@ -69,7 +71,7 @@ def test_missing_local_address_is_reported(monkeypatch):
     s.bind(("127.0.0.1", 0))
     port = s.getsockname()[1]
     s.close()
-    (dev,) = discover("127.0.0.1", port=port, local_ip="203.0.113.77", include_closed=True, delay_s=0)
+    (dev,) = discover("127.0.0.1", protocol=mms, port=port, local_ip="203.0.113.77", include_closed=True, delay_s=0)
     assert not dev.tcp_open and dev.error.key == "tool:local-address-missing"
 
 

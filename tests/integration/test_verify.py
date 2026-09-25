@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from mms_client.core.results import Category, Status
-from mms_client.core.safety import NonInteractive, Policy, Scripted
-from mms_client.core.session import Session, Target
-from mms_client.verify.checks import CheckOptions, run_checks
-from mms_client.verify.reference import Reference
-from mms_client.verify.snapshot import capture
+from ied_client.core.results import Category, Status
+from ied_client.core.safety import NonInteractive, Policy, Scripted
+from ied_client.core.session import Session, Target
+from ied_client.verify.checks import CheckOptions, run_checks
+from ied_client.verify.reference import Reference
+from ied_client.verify.snapshot import capture
 from tests.conftest import FIXTURES
 
 pytestmark = pytest.mark.integration
@@ -105,8 +105,8 @@ def test_snapshot_reference(bcu_sim, tmp_path):
 
 def test_edition_question_when_unknown(bcu_sim):
     """IDN-4/5: unknown edition → asked interactively with "don't know"; non-interactive → not-run."""
-    from mms_client.core.identity import Attr, Confidence, Edition, IdentityReport
-    from mms_client.verify.checks import edition_for_check
+    from ied_client.core.identity import Attr, Confidence, Edition, IdentityReport
+    from ied_client.verify.checks import edition_for_check
 
     s = session(bcu_sim, ui=Scripted(["unknown"]))
     try:
@@ -127,7 +127,7 @@ def test_device_supplied_reference(tmp_path):
     """VER-8: an SCL file found on the device is offered and labelled device-supplied."""
     import shutil
 
-    from mms_client.verify.reference import reference_for
+    from ied_client.verify.reference import reference_for
     from tests.sim.fixture import SimProcess
 
     files = tmp_path / "files"
@@ -148,9 +148,9 @@ def test_device_supplied_reference(tmp_path):
 
 def test_operator_edition_is_offered_for_saving(bcu_sim, tmp_path):
     """IDN-6 (Version-1.01): the operator's edition answer can be stored at once, so it is asked only once."""
-    from mms_client.core.identity import Attr, Confidence, Edition, IdentityReport, identify
-    from mms_client.inventory import load_inventory
-    from mms_client.verify.checks import edition_for_check
+    from ied_client.core.identity import Attr, Confidence, Edition, IdentityReport, identify
+    from ied_client.inventory import load_inventory
+    from ied_client.verify.checks import edition_for_check
 
     path = tmp_path / "rack.yaml"
     path.write_text(f"schema_version: 1\ndevices:\n  - name: bcu1\n    ip: 127.0.0.1\n    port: {bcu_sim.port}\n")
@@ -176,7 +176,7 @@ def test_device_scl_is_offered_without_being_asked_for(tmp_path):
     a non-interactive one does not touch the file service."""
     import shutil
 
-    from mms_client.verify.reference import reference_for
+    from ied_client.verify.reference import reference_for
     from tests.sim.fixture import SimProcess
 
     files = tmp_path / "files"

@@ -4,16 +4,17 @@ from __future__ import annotations
 
 import pytest
 
-from mms_client import codes
-from mms_client.diagnosis import iso, probes
-from mms_client.diagnosis.classify import (
+from ied_client import codes
+from ied_client.quirks import QuirkInfo
+from mms_protocol import codes as mms_codes
+from mms_protocol.diagnosis import iso, probes
+from mms_protocol.diagnosis.classify import (
     SLOTS_HINT,
     assess_association_limits,
     classify_association,
     explain_ied_connect_error,
 )
-from mms_client.diagnosis.probes import ProbeResult, iso_associate
-from mms_client.quirks import QuirkInfo
+from mms_protocol.diagnosis.probes import ProbeResult, iso_associate
 
 from . import fakes as f
 from .fakes import FakeServer
@@ -86,7 +87,7 @@ def test_authentication_suspected_from_aare(diag, certainty):
     assert (c.outcome, c.observed, c.layer, c.security) == (
         "authentication-suspected", "acse-rejected-permanent", "mms", "authentication",
     )  # fmt: skip
-    assert c.acse_diagnostic == codes.info(codes.Domain.ACSE_DIAG, diag)
+    assert c.acse_diagnostic == codes.info(mms_codes.MmsDomain.ACSE_DIAG, diag)
     (sec,) = [x for x in c.findings if x.key == "tool:security-not-supported"]
     assert sec.certainty == certainty
     assert "does not support ACSE authentication" in sec.text and f"({diag})" in sec.text
@@ -226,16 +227,16 @@ def test_no_slot_hint_when_accepted_but_reminder_always():
 
 # --- libiec61850's generic connect errors -------------------------------------------------------------
 def test_explain_ied_connect_error():
-    s = explain_ied_connect_error(codes.ied_error(5))
+    s = explain_ied_connect_error(mms_codes.ied_error(5))
     assert s.startswith("ied:connection-rejected (5): ") and "does not say which layer failed" in s
-    s = explain_ied_connect_error(codes.ied_error(5), elapsed_s=2.0, timeout_s=2.0)
+    s = explain_ied_connect_error(mms_codes.ied_error(5), elapsed_s=2.0, timeout_s=2.0)
     assert "full 2 s timeout" in s
-    s = explain_ied_connect_error(codes.ied_error(5), elapsed_s=0.01, timeout_s=2.0)
+    s = explain_ied_connect_error(mms_codes.ied_error(5), elapsed_s=0.01, timeout_s=2.0)
     assert "before the 2 s timeout" in s
-    assert "timeout" in explain_ied_connect_error(codes.ied_error(20))
+    assert "timeout" in explain_ied_connect_error(mms_codes.ied_error(20))
     assert explain_ied_connect_error(codes.association("tcp-refused")).endswith(
         "TCP connection refused (RST) on the MMS port"
     )
     assert "not configured" in explain_ied_connect_error(codes.tool("local-address-missing"))
-    assert explain_ied_connect_error(codes.mms_error(3)).startswith("mms:service-timeout (3): ")
-    assert "diagnose" in explain_ied_connect_error(codes.ied_error(34))
+    assert explain_ied_connect_error(mms_codes.mms_error(3)).startswith("mms:service-timeout (3): ")
+    assert "diagnose" in explain_ied_connect_error(mms_codes.ied_error(34))

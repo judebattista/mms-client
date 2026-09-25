@@ -6,8 +6,9 @@ import textwrap
 
 import pytest
 
-from mms_client import codes
-from mms_client.explain import Catalogue, Certainty, Hint, HintContext, default_catalogue
+from ied_client import codes
+from ied_client.explain import Catalogue, Certainty, Hint, HintContext, default_catalogue
+from mms_protocol import codes as mms_codes
 
 
 @pytest.fixture(scope="module")
@@ -20,7 +21,7 @@ def cat() -> Catalogue:
 # ---------------------------------------------------------------------------------------------------
 @pytest.mark.parametrize(
     "error",
-    [codes.data_access_error(3), codes.ied_error(21), codes.mms_error(83)],
+    [mms_codes.data_access_error(3), mms_codes.ied_error(21), mms_codes.mms_error(83)],
     ids=lambda e: e.key,
 )
 def test_access_denied_on_status_fc_is_a_fact_not_writable_by_design(cat: Catalogue, error) -> None:
@@ -35,7 +36,7 @@ def test_access_denied_on_status_fc_is_a_fact_not_writable_by_design(cat: Catalo
 
 @pytest.mark.parametrize(
     "error",
-    [codes.data_access_error(3), codes.ied_error(21), codes.mms_error(83)],
+    [mms_codes.data_access_error(3), mms_codes.ied_error(21), mms_codes.mms_error(83)],
     ids=lambda e: e.key,
 )
 def test_access_denied_on_setting_fc_says_check_access_rights_and_source_ip(cat: Catalogue, error) -> None:
@@ -48,26 +49,26 @@ def test_access_denied_on_setting_fc_says_check_access_rights_and_source_ip(cat:
 
 
 def test_access_denied_on_measurement_is_also_by_design(cat: Catalogue) -> None:
-    hint = cat.hint(codes.ied_error(21), HintContext(service="write", fc="MX", mode="expert"))
+    hint = cat.hint(mms_codes.ied_error(21), HintContext(service="write", fc="MX", mode="expert"))
     assert hint is not None and hint.certainty is Certainty.FACT and "FC=MX" in hint.text
 
 
 def test_access_denied_on_a_control_points_to_orcat_and_authority(cat: Catalogue) -> None:
-    hint = cat.hint(codes.ied_error(21), HintContext(service="operate", cdc="DPC", ctl_model=4))
+    hint = cat.hint(mms_codes.ied_error(21), HintContext(service="operate", cdc="DPC", ctl_model=4))
     assert hint is not None and hint.certainty is Certainty.LIKELY
     assert "orCat" in hint.text and "authority-probe" in hint.text
 
 
 def test_unknown_context_never_produces_a_fact(cat: Catalogue) -> None:
     # service known, FC unknown: the FC=ST fact must not be claimed
-    hint = cat.hint(codes.data_access_error(3), HintContext(service="write"))
+    hint = cat.hint(mms_codes.data_access_error(3), HintContext(service="write"))
     assert hint is not None and hint.certainty is not Certainty.FACT
     assert hint.entry_id == "data-access.object-access-denied"
-    assert cat.hint(codes.data_access_error(3)).entry_id == "data-access.object-access-denied"  # type: ignore[union-attr]
+    assert cat.hint(mms_codes.data_access_error(3)).entry_id == "data-access.object-access-denied"  # type: ignore[union-attr]
 
 
 def test_fc_in_context_is_case_insensitive(cat: Catalogue) -> None:
-    hint = cat.hint(codes.data_access_error(3), HintContext(service="WRITE", fc="st"))
+    hint = cat.hint(mms_codes.data_access_error(3), HintContext(service="WRITE", fc="st"))
     assert hint is not None and hint.certainty is Certainty.FACT and "FC=ST" in hint.text
 
 
@@ -97,13 +98,13 @@ def test_locsta_missing_with_unknown_edition(cat: Catalogue) -> None:
 # Other context-dependent hints
 # ---------------------------------------------------------------------------------------------------
 def test_temporarily_unavailable_on_rcb_points_to_the_owner(cat: Catalogue) -> None:
-    hint = cat.hint(codes.data_access_error(2), HintContext(service="set-rcb", fc="BR"))
+    hint = cat.hint(mms_codes.data_access_error(2), HintContext(service="set-rcb", fc="BR"))
     assert hint is not None and "rcb" in hint.text and "Owner" in hint.text
     assert hint.certainty is Certainty.LIKELY
 
 
 def test_type_inconsistent_on_write_mentions_the_model(cat: Catalogue) -> None:
-    hint = cat.hint(codes.ied_error(25), HintContext(service="write", fc="SP"))
+    hint = cat.hint(mms_codes.ied_error(25), HintContext(service="write", fc="SP"))
     assert hint is not None and hint.entry_id == "data-access.type-inconsistent.write"
     assert "model" in hint.text
 
@@ -156,7 +157,7 @@ def test_abrupt_disconnect_pattern_outranks_ip_advice(cat: Catalogue) -> None:
 
 
 def test_unknown_numbers_fall_back_to_a_domain_entry(cat: Catalogue) -> None:
-    hint = cat.hint(codes.ied_error(4242))
+    hint = cat.hint(mms_codes.ied_error(4242))
     assert hint is not None and hint.key == "ied:unknown-4242" and hint.entry_id == "code.unlisted"
     tool_hint = cat.hint(codes.tool("something-new"))
     assert tool_hint is not None and tool_hint.entry_id == "tool.unlisted"

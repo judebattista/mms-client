@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from mms_client.core.session import Session, Target
-from mms_client.diagnosis.diagnose import diagnose
+from ied_client.core.session import Session, Target
+from ied_client.diagnosis.diagnose import diagnose
 from tests.conftest import FIXTURES
 
 pytestmark = pytest.mark.integration
@@ -56,7 +56,7 @@ def test_missing_bind_address_gives_exact_command(sim):
 
 
 def _snapshot_of(sim):
-    from mms_client.verify.snapshot import capture
+    from ied_client.verify.snapshot import capture
 
     s = Session(Target("127.0.0.1", sim.port, "sim"))
     try:
@@ -68,7 +68,7 @@ def _snapshot_of(sim):
 
 def test_snapshot_reference_is_compared_in_the_model_layer(sim, tmp_path):
     """DIA-1 (Version-1.01): with a snapshot reference the model layer compares, it does not silently pass."""
-    from mms_client.verify.reference import Reference
+    from ied_client.verify.reference import Reference
 
     snap = _snapshot_of(sim)
     s = Session(Target("127.0.0.1", sim.port, "sim"))
@@ -95,7 +95,7 @@ def test_snapshot_reference_is_compared_in_the_model_layer(sim, tmp_path):
 
 def test_client_rcb_named_in_iec_form_is_found(sim):
     """Version-1.01: diagnose accepts the same RCB names as `rcb` / `subscribe` (LD/LLN0.urcbEvents02, no FC)."""
-    from mms_client.inventory import ClientRelation, Device, Inventory
+    from ied_client.inventory import ClientRelation, Device, Inventory
 
     inv = Inventory(devices=[Device("sim", "127.0.0.1", sim.port)],
                     clients=[ClientRelation("gw", "gateway-1", "sim", "127.0.0.9", ["SIMCTRL/LLN0.urcbEvents02"])])

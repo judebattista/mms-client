@@ -17,30 +17,43 @@ about concurrency or memory behaviour).
 ## 1. Architecture, in one paragraph
 
 ```
-CLI (shell + one-shot)      mms_client.cli        argparse registry, prompt_toolkit, rich
+CLI (shell + one-shot)      ied_client.cli          argparse registry, prompt_toolkit, rich
       │
-Check engine                mms_client.verify      checks → CheckResult (status, category, evidence, raw)
-      │                     mms_client.diagnosis   layered diagnosis, raw probes, discover
-Core client                 mms_client.core        session, model, read/write, controls, reports,
-      │                                            setting groups, files, identity, log, restore
-      │                     mms_client.scl         SCL parser (Ed1/Ed2/Ed2.1), expected model
-      │                     mms_client.explain     hint catalogue (YAML data)
-Adapter                     mms_client.adapter     the only code touching pyiec61850-ng (PLT-4)
+Check engine                ied_client.verify       checks → CheckResult (status, category, evidence, raw)
+      │                     ied_client.diagnosis    layered diagnosis engine, discover
+Core client                 ied_client.core         session, model, read/write, controls, reports,
+      │                                             setting groups, files, identity, log, restore
+      │                     ied_client.scl          SCL parser (Ed1/Ed2/Ed2.1), expected model
+      │                     ied_client.explain      hint catalogue (YAML data)
+Protocol contract           ied_client.protocol     ProtocolModule / Association / Naming, shared types
+      ▼  entry point ied_client.protocols: mms = "mms_protocol:protocol"
+MMS protocol module         mms_protocol            association, MMS naming, MMS codes, hints, quirks
+      │                     mms_protocol.diagnosis  raw COTP/ISO/ACSE/MMS probes, classification
+Adapter                     mms_protocol.adapter    the only code touching pyiec61850-ng (PLT-4)
       │
 libiec61850 1.6.1, as bundled in the pyiec61850-ng 1.6.1.10 wheel
 ```
 
-Two structural rules are enforced by `tests/unit/test_architecture.py`, not just documented:
+The client (`ied_client`) is protocol-independent: it works in ACSI terms (`ObjectRef`,
+`DatasetRef`, FCs, CDCs) and reaches the device only through the `Association` a protocol module
+opens. The MMS module is the one plugged in by default; `--protocol NAME` or `protocol:` on an
+inventory device picks another. [docs/architecture.md](docs/architecture.md) describes the
+contract and how to add a module.
 
-- **PLT-4** — nothing outside `mms_client.adapter` imports `pyiec61850` (checked by AST walk
+The structural rules are enforced by `tests/unit/test_architecture.py`, not just documented:
+
+- **PLT-4** — nothing outside `mms_protocol.adapter` imports `pyiec61850` (checked by AST walk
   over every source file, including detecting `importlib`-based indirection).
-- **ARC-1** — the CLI doesn't reach into adapter internals; anything the CLI can do is callable
+- **ARC-5** — nothing in `ied_client` imports `mms_protocol`; protocol modules are found only
+  through the entry points. The contract package `ied_client.protocol` depends on nothing but
+  `ied_client.codes` and `ied_client.core.refs`.
+- **ARC-1** — the CLI doesn't reach into a protocol module; anything the CLI can do is callable
   from plain Python, because the future pytest phase (§18 of the spec) will be built directly
-  on `mms_client.core`, not on the CLI.
+  on `ied_client.core`, not on the CLI.
 
-If you're extending the tool, put protocol-touching code in the adapter, business logic in
-`core`/`verify`/`diagnosis`, and keep the CLI a thin renderer. The architecture test will fail
-your PR if you don't.
+If you're extending the tool, put protocol-touching code in the protocol module (library calls in
+its adapter), business logic in `core`/`verify`/`diagnosis`, and keep the CLI a thin renderer.
+The architecture test will fail your PR if you don't.
 
 ---
 
@@ -192,22 +205,23 @@ rejected anything.
 
 ## 5. Scripting against the core library directly (bypassing the CLI)
 
-ARC-1 exists specifically so you're not limited to the CLI. `mms_client.core.session.Session`
+ARC-1 exists specifically so you're not limited to the CLI. `ied_client.core.session.Session`
 is the object the CLI itself drives — everything the shell does is a thin call into it. Minimal
 example:
 
 ```python
-from mms_client.core.session import Session
-from mms_client.core.safety import Policy, NonInteractive
-from mms_client.codes import ErrorInfo  # for typed error handling
+from ied_client.core.session import Session, resolve_target
+from ied_client.core.safety import Policy, NonInteractive
+from ied_client.core import readwrite
+from ied_client.codes import ErrorInfo  # for typed error handling
 
 session = Session(
-    target=...,               # mms_client.core.session.Target / resolve_target()
-    policy=Policy(...),       # mode, safety profile
-    ui=NonInteractive(),      # never blocks waiting for input (IDN-5) — use Scripted() in tests
+    resolve_target("10.0.0.12", None),  # or a device name + Inventory; protocol="mms" is the default
+    policy=Policy(),                     # mode, safety profile
+    ui=NonInteractive(),                 # never blocks waiting for input (IDN-5) — use Scripted() in tests
 )
 session.connect()
-result = session.read("CTRL/CSWI1.Pos.stVal")
+result = readwrite.read(session, "CTRL/CSWI1.Pos.stVal")
 ```
 
 Key things to know before building on this:
@@ -227,15 +241,17 @@ Key things to know before building on this:
   `explain last`. If you're scripting, you can read it directly instead of shelling out to
   `explain`.
 - Reads/writes/controls all return the same structured dataclasses the CLI renders
-  (`adapter/types.py`: `VarSpec`, `BitString`, `UtcTime`, `RcbValues`, `Report`,
+  (`ied_client/protocol/types.py`: `VarSpec`, `BitString`, `UtcTime`, `RcbValues`, `Report`,
   `ControlStepResult`, …) — nothing native (no ctypes pointers, no SWIG objects) ever crosses
-  out of the adapter, so these are safe to hold onto, pickle, or pass to other code.
-- `mms_client.core.results.envelope(...)` is the exact function the CLI uses to build the JSON
+  out of a protocol module, so these are safe to hold onto, pickle, or pass to other code.
+- `session.client` is the protocol module's `Association` (`ied_client/protocol/api.py`) if you
+  need a service the core does not wrap; for MMS it wraps `mms_protocol.adapter.IedClient`.
+- `ied_client.core.results.envelope(...)` is the exact function the CLI uses to build the JSON
   document in §4 — call it yourself if you want your script's output to be indistinguishable
   from the CLI's `--json` output for downstream tooling.
 
 This is also where the future pytest phase (§18, deferred) is expected to attach: fixtures and
-assertions directly on `CheckResult`/`CheckReport` from `mms_client.verify`, not on CLI text
+assertions directly on `CheckResult`/`CheckReport` from `ied_client.verify`, not on CLI text
 output.
 
 ---
@@ -263,14 +279,17 @@ from the CLI surface:
 
 ---
 
-## 7. Diagnosis internals (`mms_client.diagnosis`)
+## 7. Diagnosis internals (`ied_client.diagnosis`, `mms_protocol.diagnosis`)
 
 `diagnose` (DIA-1) runs layers in a fixed order and **stops at the first failing one**:
 network → transport/session → MMS initiate → identity → model → reports → controls (only with
-`--controls`). Each layer is independently callable if you're scripting around specific
-failures rather than always wanting the full sequence — see `mms_client/diagnosis/probes.py`
-(raw TCP/COTP/session/presentation/ACSE/MMS-initiate probes) and `classify.py` (turns a
-libiec61850 generic connect failure into a specific layer classification, DIA-3).
+`--controls`). The engine (`ied_client/diagnosis/diagnose.py`) owns the order and the ACSI
+layers; the layers below identity come from the protocol module (`ConnectionDiagnosis`). For
+MMS each is independently callable if you're scripting around specific failures rather than
+always wanting the full sequence — see `mms_protocol/diagnosis/probes.py` (raw
+TCP/COTP/session/presentation/ACSE/MMS-initiate probes), `classify.py` (turns a libiec61850
+generic connect failure into a specific layer classification, DIA-3) and `connection.py` (the
+MMS layers as `diagnose` runs them).
 
 `classify.py`'s module docstring documents the **observed libiec61850 server behaviour when
 association slots are exhausted** and which layer each of our own probes sees each failure
@@ -294,10 +313,10 @@ default exists (it's there so a typo'd subnet doesn't turn into scanning a /8).
 
 ## 8. Verification internals: SCL parsing, snapshots, and the ignore file
 
-`mms_client.scl` implements its own SCL (SCD/CID/ICD/IID) parser for both the 2003 (Ed1) and
+`ied_client.scl` implements its own SCL (SCD/CID/ICD/IID) parser for both the 2003 (Ed1) and
 2007 (Ed2/Ed2.1) schemas, including mixed-edition SCDs (VER-4) — **pyiec61850-ng has no Python
 SCL parser**, so this is original parsing code, not a wrapper. If you're debugging a
-reference-comparison mismatch, `mms_client/scl/parser.py`, `expected.py` (builds the expected
+reference-comparison mismatch, `ied_client/scl/parser.py`, `expected.py` (builds the expected
 device model from parsed SCL) and `edition.py` (edition inference, see §9 below) are the
 modules to read.
 
@@ -370,9 +389,11 @@ These are plain YAML, versioned in the repo, and are meant to be edited by anyon
 tool, not just by developers — this is explicit in the spec (EXP-5) and in the quirks file's
 own header comment.
 
-**Hints** (`src/mms_client/data/hints/*.yaml`, one file per area — `control.yaml`,
-`tool.yaml`, `checks.yaml`, `association.yaml` — plus the general `hints.yaml`): keyed by
-`"<domain>:<name>"` matching `ErrorInfo.key` from `mms_client/codes.py` (e.g.
+**Hints** (`src/ied_client/data/hints/*.yaml`, one file per area — `control.yaml`,
+`tool.yaml`, `checks.yaml` — plus the general `hints.yaml`, and the MMS module's own
+`src/mms_protocol/data/hints/` — `codes.yaml`, `association.yaml`): keyed by
+`"<domain>:<name>"` matching `ErrorInfo.key` (generic domains in `ied_client/codes.py`, MMS
+domains in `mms_protocol/codes.py`) (e.g.
 `data-access:object-access-denied`), or `check:<check id>` for check-result hints. Matching is
 context-sensitive by design (EXP-3): the same error code can have different entries depending
 on FC/CDC/service/mode (`object-access-denied` on FC=ST reads as "not writable by design"; on
@@ -386,12 +407,12 @@ than pasting from the standard.
 
 EXP-7 (acceptance criterion, not aspirational): v1 must cover every libiec61850
 `IED_ERROR_*` code, every MMS DataAccessError value, every control AddCause value, and every
-association/initiate rejection reason. If you add a new code to `codes.py`, add its catalogue
+association/initiate rejection reason. If you add a new code to a `codes.py`, add its catalogue
 entry in the same change — `check.unlisted` / a generic fallback entry exists precisely to make
 an uncovered code visible rather than silently swallowed, treat seeing it as a bug to fix, not
 normal output.
 
-**Quirks** (`src/mms_client/data/quirks.yaml`, IDN-9): starts empty by design (no vendor IEDs
+**Quirks** (`src/mms_protocol/data/quirks.yaml`, IDN-9): starts empty by design (no vendor IEDs
 were available for Phase 0 — RSK-6 is explicitly "pending real devices"). Matching is by
 `match.vendor`/`match.model`/`match.firmware` against the identity the device actually reports
 (MMS Identify), each field an exact string or glob, case/whitespace-insensitive; when several
@@ -438,7 +459,7 @@ These are established findings (`docs/spikes.md`), not open questions:
 ```sh
 uv run pytest                                        # unit + integration; simulated IED spawns automatically
 uv run pytest -m soak -s                              # RSK-5 memory soak (10k read/write cycles) — not run by default
-uv run pytest tests/unit/test_architecture.py         # the PLT-4 / ARC-1 structural checks, fast, run these first on any adapter/CLI change
+uv run pytest tests/unit/test_architecture.py         # the PLT-4 / ARC-1 / ARC-5 structural checks, fast, run these first on any adapter/CLI change
 uv run ruff check src tests
 uv run python -m tests.sim --scl tests/fixtures/scl/bcu_ed2.cid --port 10102   # standalone simulator, see below
 ```
@@ -451,7 +472,7 @@ lifetimes, callback registration) even though CI won't force you to.
 
 It's a **real libiec61850 server** (not a mock), driven through the adapter's own ctypes
 layer, built from a model config or directly from an SCL file
-(`mms_client.scl.to_libiec61850_config`). It runs as a **separate process** in the test suite
+(`mms_protocol.libiec_config.to_libiec61850_config`). It runs as a **separate process** in the test suite
 specifically so server-side callbacks never compete with the client under test for one
 interpreter's GIL (this matters given §2 above). It has scriptable behaviour worth knowing
 about if you're writing tests against it: switching-hierarchy authority checks with AddCause,

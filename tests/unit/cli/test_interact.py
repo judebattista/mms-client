@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import io
 
-from mms_client.cli.interact import PromptInteraction, TextNonInteractive
-from mms_client.cli.render import Output
+from ied_client.cli.interact import PromptInteraction, TextNonInteractive
+from ied_client.cli.render import Output
 
 
 def ui(answers):

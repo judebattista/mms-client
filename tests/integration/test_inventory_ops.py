@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from mms_client.inventory import Device, IdentityOverride, Inventory, Reference
-from mms_client.inventory_ops import from_scd, validate, write_back_identity
+from ied_client.inventory import Device, IdentityOverride, Inventory, Reference
+from ied_client.inventory_ops import from_scd, validate, write_back_identity
 from tests.conftest import FIXTURES
 
 pytestmark = pytest.mark.integration
@@ -30,7 +30,7 @@ def test_from_scd_and_write_back(tmp_path):
     inv.save()
     text = (tmp_path / "exp.yaml").read_text()
     assert "scd: " in text and "rack_mixed.scd" in text
-    from mms_client.inventory import load_inventory
+    from ied_client.inventory import load_inventory
 
     again = load_inventory(tmp_path / "exp.yaml")
     assert again.device("bcu1").reference.path.exists()

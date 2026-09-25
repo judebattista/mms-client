@@ -6,9 +6,10 @@ import json
 
 import pytest
 
-from mms_client import codes
-from mms_client.explain import Catalogue, HintContext, default_catalogue, render_explanation
-from mms_client.explain.render import render, render_search
+from ied_client import codes
+from ied_client.explain import Catalogue, HintContext, default_catalogue, render_explanation
+from ied_client.explain.render import render, render_search
+from mms_protocol import codes as mms_codes
 
 
 @pytest.fixture(scope="module")
@@ -135,8 +136,8 @@ def test_explain_error_has_keys_and_hint(cat: Catalogue) -> None:
 def test_explanations_for_all_error_codes_give_next_checks(cat: Catalogue) -> None:
     missing = []
     for table, make in (
-        (codes.IED_ERRORS, codes.ied_error),
-        (codes.DATA_ACCESS_ERRORS, codes.data_access_error),
+        (mms_codes.IED_ERRORS, mms_codes.ied_error),
+        (mms_codes.DATA_ACCESS_ERRORS, mms_codes.data_access_error),
         (codes.ADD_CAUSES, codes.add_cause),
     ):
         for n in table:

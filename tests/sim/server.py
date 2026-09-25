@@ -418,7 +418,8 @@ def main(argv: list[str] | None = None) -> int:
     opts = SimOptions.from_json(json.loads(args.options))
     cfg_path = args.config
     if args.scl:
-        from mms_client.scl import expand_server, load_scl, to_libiec61850_config
+        from ied_client.scl import expand_server, load_scl
+        from mms_protocol.libiec_config import to_libiec61850_config
 
         doc = load_scl(args.scl)
         ied = args.ied or doc.ied_names[0]

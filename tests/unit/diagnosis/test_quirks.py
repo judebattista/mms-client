@@ -7,7 +7,16 @@ import datetime as dt
 import pytest
 import yaml
 
-from mms_client.quirks import QuirkDB, QuirkInfo, QuirksError, builtin_quirks_text, load_quirks
+from ied_client.quirks import QuirkDB, QuirkInfo, QuirksError, load_quirks
+from mms_protocol import protocol as mms
+
+
+def builtin_quirks_text() -> str:
+    """The MMS module's quirks file (PROTO-12)."""
+    [(label, text)] = mms.quirks_sources()
+    assert label == "mms_protocol/data/quirks.yaml"
+    return text
+
 
 FILE = """\
 # test quirks
@@ -39,8 +48,9 @@ def test_builtin_file_is_empty_but_documented():
     assert "max_associations" in text and "slot_release_after_abrupt_disconnect_s" in text
     doc = yaml.safe_load(text)
     assert doc == {"schema_version": 1, "quirks": None}
-    assert len(load_quirks()) == 0
-    assert load_quirks().lookup("Acme", "BCU-500", "2.3.1") is None
+    db = load_quirks(sources=mms.quirks_sources())
+    assert len(db) == 0 and db.sources == ["mms_protocol/data/quirks.yaml"]
+    assert db.lookup("Acme", "BCU-500", "2.3.1") is None
 
 
 def test_most_specific_match_wins(qfile):

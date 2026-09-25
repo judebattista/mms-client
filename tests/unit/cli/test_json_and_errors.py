@@ -7,20 +7,21 @@ import json
 
 import pytest
 
-from mms_client import codes
-from mms_client.adapter import ConnectError, EncodeError, NotConnectedError, ServiceError
-from mms_client.cli import errors, registry
-from mms_client.cli.context import CliContext
-from mms_client.cli.main import main
-from mms_client.cli.options import Options
-from mms_client.cli.registry import UsageError
-from mms_client.cli.render import Output
-from mms_client.cli.result import CommandResult
-from mms_client.cli.shell import Shell
-from mms_client.core.model import AmbiguousFcError, NotInModelError
-from mms_client.core.refs import ObjectRef, RefError
-from mms_client.core.safety import ConfirmationDeclined, NonInteractive, PolicyError, Scripted
-from mms_client.inventory import InventoryError
+from ied_client import codes
+from ied_client.cli import errors, registry
+from ied_client.cli.context import CliContext
+from ied_client.cli.main import main
+from ied_client.cli.options import Options
+from ied_client.cli.registry import UsageError
+from ied_client.cli.render import Output
+from ied_client.cli.result import CommandResult
+from ied_client.cli.shell import Shell
+from ied_client.core.model import AmbiguousFcError, NotInModelError
+from ied_client.core.refs import ObjectRef, RefError
+from ied_client.core.safety import ConfirmationDeclined, NonInteractive, PolicyError, Scripted
+from ied_client.inventory import InventoryError
+from ied_client.protocol.errors import ConnectError, EncodeError, NotConnectedError, ServiceError
+from mms_protocol import codes as mms_codes
 
 
 def run_json(capsys, argv):
@@ -103,9 +104,9 @@ def test_help_for_one_command(capsys):
         (NotInModelError("nope"), 1, "tool:object-not-in-model"),
         (RefError("bad"), 2, "tool:invalid-reference"),
         (EncodeError("bad value"), 2, "tool:usage-error"),
-        (ConnectError("associate", "h:102", codes.ied_error(5)), 3, "ied:connection-rejected"),
+        (ConnectError("associate", "h:102", mms_codes.ied_error(5)), 3, "ied:connection-rejected"),
         (NotConnectedError("gone"), 3, "tool:not-connected"),
-        (ServiceError("read", "X", codes.data_access_error(3)), 1, "data-access:object-access-denied"),
+        (ServiceError("read", "X", mms_codes.data_access_error(3)), 1, "data-access:object-access-denied"),
         (PolicyError(codes.tool("refused-standard-mode"), "expert"), 4, "tool:refused-standard-mode"),
         (ConfirmationDeclined("no"), 4, "tool:non-interactive-no-prompt"),
         (InventoryError("bad"), 2, "tool:inventory-invalid"),
@@ -126,7 +127,7 @@ def test_operator_decline_is_not_a_fault():
 
 
 def test_hint_uses_context():
-    h = errors.hint_for(codes.data_access_error(3), {"service": "write", "fc": "ST"})
+    h = errors.hint_for(mms_codes.data_access_error(3), {"service": "write", "fc": "ST"})
     assert h is not None and "read-only" in h.render()
 
 

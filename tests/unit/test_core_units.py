@@ -7,15 +7,12 @@ import json
 import pytest
 import yaml
 
-from mms_client import codes
-from mms_client.adapter import BitString, MmsKind, UtcTime, VarSpec, value_from_json, value_to_json
-from mms_client.adapter.codec import decode, encode, parse_text
-from mms_client.adapter.errors import EncodeError
-from mms_client.core.identity import Edition, edition_from_ldns
-from mms_client.core.model import DeviceModel, LogicalDeviceInfo, build_ln
-from mms_client.core.refs import ObjectRef, RefError, parse_mms, parse_ref, parse_shell_path
-from mms_client.core.results import Category, CheckReport, CheckResult, Status, envelope
-from mms_client.core.safety import (
+from ied_client import codes
+from ied_client.core.identity import Edition, edition_from_ldns
+from ied_client.core.model import DeviceModel, LogicalDeviceInfo, build_ln
+from ied_client.core.refs import ObjectRef, RefError, parse_ref, parse_shell_path
+from ied_client.core.results import Category, CheckReport, CheckResult, Status, envelope
+from ied_client.core.safety import (
     ConfirmationDeclined,
     NonInteractive,
     Policy,
@@ -23,11 +20,17 @@ from mms_client.core.safety import (
     SafetyProfile,
     Scripted,
 )
-from mms_client.core.session import owner_ip, resolve_target
-from mms_client.core.sessionlog import SessionLog, read_log, restorable_writes
-from mms_client.inventory import InventoryError, parse_inventory
-from mms_client.verify.diff import IgnoreRules, diff_snapshots
-from mms_client.verify.snapshot import Snapshot
+from ied_client.core.session import owner_ip, resolve_target
+from ied_client.core.sessionlog import SessionLog, read_log, restorable_writes
+from ied_client.inventory import InventoryError, parse_inventory
+from ied_client.protocol.errors import EncodeError
+from ied_client.protocol.types import BitString, UtcTime, ValueKind, VarSpec, value_from_json, value_to_json
+from ied_client.protocol.values import parse_text
+from ied_client.verify.diff import IgnoreRules, diff_snapshots
+from ied_client.verify.snapshot import Snapshot
+from mms_protocol import codes as mms_codes
+from mms_protocol.adapter.codec import decode, encode
+from mms_protocol.names import MmsNaming, mms_item, parse_mms
 
 
 # ------------------------------------------------------------------------- refs
@@ -43,7 +46,7 @@ from mms_client.verify.snapshot import Snapshot
     ],
 )
 def test_parse_ref(text, cwd, expected):
-    r = parse_ref(text, cwd)
+    r = parse_ref(text, cwd, native=MmsNaming())
     assert (r.ld, r.ln, r.path, r.fc) == expected
 
 
@@ -53,17 +56,17 @@ def test_parse_ref_known_lds_and_errors():
     with pytest.raises(RefError):
         parse_ref("A/B.C [XX]")
     with pytest.raises(RefError):
-        parse_ref("A/B$ST$C", fc="MX")
+        parse_ref("A/B$ST$C", fc="MX", native=MmsNaming())
     with pytest.raises(RefError):
         parse_ref("/")
     assert parse_shell_path("..", ("A", "B")) == ("A",)
     assert parse_mms("LD/LLN0$BR$brcb01") == ObjectRef("LD", "LLN0", ("brcb01",), "BR")
-    assert ObjectRef("LD", "LN", ("DO", "DA"), "ST").mms_item() == "LN$ST$DO$DA"
+    assert mms_item(ObjectRef("LD", "LN", ("DO", "DA"), "ST")) == "LN$ST$DO$DA"
 
 
 # ------------------------------------------------------------------------- codec (needs the native lib, no network)
 def roundtrip(spec: VarSpec, value):
-    from mms_client.adapter._native import lib
+    from mms_protocol.adapter._native import lib
 
     p = encode(spec, value)
     try:
@@ -73,28 +76,28 @@ def roundtrip(spec: VarSpec, value):
 
 
 def test_codec_roundtrips():
-    s = VarSpec(MmsKind.STRUCTURE, children=(VarSpec(MmsKind.BOOLEAN, "b"), VarSpec(MmsKind.INTEGER, "i", 32),
-                                             VarSpec(MmsKind.FLOAT, "f", 32), VarSpec(MmsKind.VISIBLE_STRING, "s", 64),
-                                             VarSpec(MmsKind.BIT_STRING, "q", 13), VarSpec(MmsKind.OCTET_STRING, "o", 8),
-                                             VarSpec(MmsKind.UNSIGNED, "u", 32), VarSpec(MmsKind.UTC_TIME, "t")))
+    s = VarSpec(ValueKind.STRUCTURE, children=(VarSpec(ValueKind.BOOLEAN, "b"), VarSpec(ValueKind.INTEGER, "i", 32),
+                                             VarSpec(ValueKind.FLOAT, "f", 32), VarSpec(ValueKind.VISIBLE_STRING, "s", 64),
+                                             VarSpec(ValueKind.BIT_STRING, "q", 13), VarSpec(ValueKind.OCTET_STRING, "o", 8),
+                                             VarSpec(ValueKind.UNSIGNED, "u", 32), VarSpec(ValueKind.UTC_TIME, "t")))
     v = {"b": True, "i": -5, "f": 0.1, "s": "abc", "q": BitString.from_text("0100000000000"), "o": b"\x01\x02",
          "u": 7, "t": UtcTime(1_700_000_000_123, 0, 0x0A)}
     assert roundtrip(s, v) == v
-    assert roundtrip(VarSpec(MmsKind.ARRAY, size=3, element=VarSpec(MmsKind.INTEGER, size=8)), [1, 2, 3]) == [1, 2, 3]
+    assert roundtrip(VarSpec(ValueKind.ARRAY, size=3, element=VarSpec(ValueKind.INTEGER, size=8)), [1, 2, 3]) == [1, 2, 3]
 
 
 def test_codec_rejects_wrong_types():
     with pytest.raises(EncodeError):
-        encode(VarSpec(MmsKind.BOOLEAN), 1)
+        encode(VarSpec(ValueKind.BOOLEAN), 1)
     with pytest.raises(EncodeError):
-        encode(VarSpec(MmsKind.INTEGER, size=8), 200)
+        encode(VarSpec(ValueKind.INTEGER, size=8), 200)
     with pytest.raises(EncodeError):
-        encode(VarSpec(MmsKind.VISIBLE_STRING, size=3), "toolong")
+        encode(VarSpec(ValueKind.VISIBLE_STRING, size=3), "toolong")
     with pytest.raises(EncodeError):
-        encode(VarSpec(MmsKind.BIT_STRING, size=2), BitString.from_text("101"))
+        encode(VarSpec(ValueKind.BIT_STRING, size=2), BitString.from_text("101"))
     with pytest.raises(EncodeError):
-        parse_text(VarSpec(MmsKind.UNSIGNED, size=8), "-1")
-    assert parse_text(VarSpec(MmsKind.OCTET_STRING, size=-8), "01:02") == b"\x01\x02"
+        parse_text(VarSpec(ValueKind.UNSIGNED, size=8), "-1")
+    assert parse_text(VarSpec(ValueKind.OCTET_STRING, size=-8), "01:02") == b"\x01\x02"
 
 
 def test_value_json_roundtrip():
@@ -110,12 +113,12 @@ def test_bitstring_int_views():
 # ------------------------------------------------------------------------- model
 def _model() -> DeviceModel:
     ln_spec = VarSpec(
-        MmsKind.STRUCTURE,
+        ValueKind.STRUCTURE,
         "CSWI1",
         children=(
-            VarSpec(MmsKind.STRUCTURE, "ST", children=(VarSpec(MmsKind.STRUCTURE, "Pos", children=(VarSpec(MmsKind.BIT_STRING, "stVal", 2),)),)),
-            VarSpec(MmsKind.STRUCTURE, "CF", children=(VarSpec(MmsKind.STRUCTURE, "Pos", children=(VarSpec(MmsKind.INTEGER, "ctlModel", 8),)),)),
-            VarSpec(MmsKind.STRUCTURE, "BR", children=(VarSpec(MmsKind.STRUCTURE, "brcb01", children=(VarSpec(MmsKind.VISIBLE_STRING, "RptID", 65),)),)),
+            VarSpec(ValueKind.STRUCTURE, "ST", children=(VarSpec(ValueKind.STRUCTURE, "Pos", children=(VarSpec(ValueKind.BIT_STRING, "stVal", 2),)),)),
+            VarSpec(ValueKind.STRUCTURE, "CF", children=(VarSpec(ValueKind.STRUCTURE, "Pos", children=(VarSpec(ValueKind.INTEGER, "ctlModel", 8),)),)),
+            VarSpec(ValueKind.STRUCTURE, "BR", children=(VarSpec(ValueKind.STRUCTURE, "brcb01", children=(VarSpec(ValueKind.VISIBLE_STRING, "RptID", 65),)),)),
         ),
     )
     m = DeviceModel()
@@ -259,30 +262,30 @@ class _FakeRcbClient:
         self.writes: list[dict] = []
 
     def get_rcb(self, ref):
-        from mms_client.adapter import RcbValues
+        from ied_client.protocol.types import RcbValues
 
         owner = bytes([10, 0, 0, 9]) if self.resv_tms else b""
         return RcbValues(ref, True, rpt_ena=False, resv_tms=self.resv_tms, owner=owner)
 
     def set_rcb(self, ref, changes, single_request=True):
-        from mms_client.adapter import ServiceError
+        from ied_client.protocol.errors import ServiceError
 
         self.writes.append(dict(changes))
         if self.refuse_release:
-            raise ServiceError("set-rcb", ref, codes.ied_error(21))
+            raise ServiceError("set-rcb", ref, mms_codes.ied_error(21))
         if not self.keeps_reservation:
             self.resv_tms = changes.get("resv_tms", self.resv_tms)
 
 
 def _brcb_session(client, *, before_resv_tms=0):
-    from mms_client.adapter import RcbValues
-    from mms_client.core.model import ControlBlockInfo
-    from mms_client.core.reports import _brcb_reservation_cleanup
-    from mms_client.core.session import Session, Target
+    from ied_client.core.model import ControlBlockInfo
+    from ied_client.core.reports import _brcb_reservation_cleanup
+    from ied_client.core.session import Session, Target
+    from ied_client.protocol.types import RcbValues
 
-    s = Session(Target("10.0.0.12"))
+    s = Session(Target("10.0.0.12", 102))
     s.client = client  # type: ignore[assignment]
-    cb = ControlBlockInfo("CTRL", "LLN0", "brcbA01", "BR", VarSpec(MmsKind.STRUCTURE))
+    cb = ControlBlockInfo("CTRL", "LLN0", "brcbA01", "BR", VarSpec(ValueKind.STRUCTURE))
     before = RcbValues(cb.reference, True, rpt_ena=False, resv_tms=before_resv_tms, owner=b"")
     s.register_cleanup(_brcb_reservation_cleanup(s, cb, before, ["station-manager-1"]))
     return s
@@ -317,7 +320,7 @@ def test_brcb_reserved_by_configuration_is_not_released():
 
 def test_brcb_reservation_held_by_another_client_is_left_alone():
     client = _FakeRcbClient()
-    client.get_rcb = lambda ref: __import__("mms_client.adapter", fromlist=["RcbValues"]).RcbValues(  # type: ignore[method-assign]
+    client.get_rcb = lambda ref: __import__("ied_client.protocol.types", fromlist=["RcbValues"]).RcbValues(  # type: ignore[method-assign]
         ref, True, rpt_ena=False, resv_tms=30, owner=bytes([10, 0, 0, 5]))
     notes = _brcb_session(client).run_cleanups()
     assert client.writes == []
@@ -326,7 +329,7 @@ def test_brcb_reservation_held_by_another_client_is_left_alone():
 
 # ------------------------------------------------------------------------- LOG-2: restore markers (Version-1.01)
 def test_restored_seqs_counts_only_successful_restores_of_the_source_session():
-    from mms_client.core.sessionlog import restored_seqs
+    from ied_client.core.sessionlog import restored_seqs
 
     entries = [
         {"seq": 1, "kind": "write", "ok": True, "ref": "LD/LN.A.b", "fc": "SP", "before": 1},
@@ -341,7 +344,7 @@ def test_restored_seqs_counts_only_successful_restores_of_the_source_session():
 
 
 def test_restored_seqs_reads_pre_1_01_markers_only_in_their_own_log():
-    from mms_client.core.sessionlog import restored_seqs
+    from ied_client.core.sessionlog import restored_seqs
 
     legacy = [{"seq": 9, "kind": "write", "ok": True, "restored_from": 4, "before": 2, "after": 1}]
     assert restored_seqs(legacy, "S1", same_log=True) == {4}
@@ -363,8 +366,8 @@ def test_restorable_writes_skips_restore_writes_and_already_restored():
 def test_scl_edition_is_confirmed_only_when_the_file_states_it_for_the_ied(tmp_path):
     from pathlib import Path
 
-    from mms_client.core.identity import Confidence, IdentityReport, determine_edition
-    from mms_client.verify.reference import Reference
+    from ied_client.core.identity import Confidence, IdentityReport, determine_edition
+    from ied_client.verify.reference import Reference
 
     scl = Path(__file__).resolve().parents[1] / "fixtures" / "scl"
     # one IED in the file (CID): the file states that IED's edition
@@ -383,7 +386,7 @@ def test_scl_edition_is_confirmed_only_when_the_file_states_it_for_the_ied(tmp_p
 
 
 def test_operator_edition_is_the_last_resort_and_survives_a_new_identity():
-    from mms_client.core.identity import Attr, Confidence, IdentityReport, determine_edition
+    from ied_client.core.identity import Attr, Confidence, IdentityReport, determine_edition
 
     answer = Attr(Edition.ED1, "operator", Confidence.OPERATOR)
     rep = IdentityReport()

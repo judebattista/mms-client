@@ -1,16 +1,18 @@
-"""expand_server(): the server model as an MMS client sees it."""
+"""expand_server(): the server model as a client sees it."""
 
 from __future__ import annotations
 
 import pytest
 
-from mms_client.scl import (
+from ied_client.core.refs import ObjectRef
+from ied_client.protocol.types import DatasetRef
+from ied_client.scl import (
     ExpectedAttribute,
     ExpectedDO,
     ExpectedServer,
-    MmsType,
     SclDocument,
     SclError,
+    ValueType,
     expand_server,
     load_scl,
 )
@@ -60,16 +62,15 @@ def test_tree_keeps_cdc_and_do_da_distinction(bcu: ExpectedServer) -> None:
     assert phv.fcs == {"MX", "CF"}
 
 
-def test_sdo_leaf_reference_and_mms_path(bcu: ExpectedServer) -> None:
+def test_sdo_leaf_reference_and_object_ref(bcu: ExpectedServer) -> None:
     a = bcu.attribute("BCU1CTRL/MMXU1.PhV.phsA.cVal.mag.f")
     assert a is not None
     assert a.fc == "MX"
     assert a.b_type == "FLOAT32"
-    assert a.mms_type == MmsType("float", 32)
+    assert a.value_type == ValueType("float", 32)
     assert a.do_path == ("PhV", "phsA")
     assert a.da_path == ("cVal", "mag", "f")
-    assert a.mms_path == "MMXU1$MX$PhV$phsA$cVal$mag$f"
-    assert a.mms_ref == "BCU1CTRL/MMXU1$MX$PhV$phsA$cVal$mag$f"
+    assert a.object_ref == ObjectRef("BCU1CTRL", "MMXU1", ("PhV", "phsA", "cVal", "mag", "f"), "MX")
     assert a.do_ref == "BCU1CTRL/MMXU1.PhV.phsA"
     # BDAs inherit the DA's trigger options
     assert a.trigger_options == {"dchg", "dupd"}
@@ -82,16 +83,16 @@ def test_flat_list_contains_constructed_and_leaves_in_order(bcu: ExpectedServer)
     assert refs[:4] == ["BCU1CTRL/CSWI1.Pos.SBOw", "BCU1CTRL/CSWI1.Pos.SBOw.ctlVal",
                         "BCU1CTRL/CSWI1.Pos.SBOw.origin", "BCU1CTRL/CSWI1.Pos.SBOw.origin.orCat"]
     oper = bcu.attribute("BCU1CTRL/CSWI1.Pos.Oper", "CO")
-    assert oper.mms_type == MmsType("structure")
+    assert oper.value_type == ValueType("structure")
     assert [c.name for c in oper.children] == ["ctlVal", "origin", "ctlNum", "T", "Test", "Check"]
     or_cat = bcu.attribute("BCU1CTRL/CSWI1.Pos.Oper.origin.orCat")
     assert (or_cat.fc, or_cat.b_type, or_cat.enum_type) == ("CO", "Enum", "OrCatKind")
     assert or_cat.enum_values[3] == "remote-control"
-    assert or_cat.mms_path == "CSWI1$CO$Pos$Oper$origin$orCat"
+    assert or_cat.object_ref == ObjectRef("BCU1CTRL", "CSWI1", ("Pos", "Oper", "origin", "orCat"), "CO")
     check = bcu.attribute("BCU1CTRL/CSWI1.Pos.Oper.Check")
-    assert check.mms_type == MmsType("bit-string", 2)
-    assert bcu.attribute("BCU1CTRL/CSWI1.Pos.stVal").mms_type == MmsType("bit-string", 2)
-    assert bcu.attribute("BCU1CTRL/GGIO1.SPCSO2.SBO").mms_type == MmsType("visible-string", 129)
+    assert check.value_type == ValueType("bit-string", 2)
+    assert bcu.attribute("BCU1CTRL/CSWI1.Pos.stVal").value_type == ValueType("bit-string", 2)
+    assert bcu.attribute("BCU1CTRL/GGIO1.SPCSO2.SBO").value_type == ValueType("visible-string", 129)
 
 
 def test_find(bcu: ExpectedServer) -> None:
@@ -113,7 +114,7 @@ def test_sg_attributes_get_se_copies(bcu: ExpectedServer) -> None:
     sg = bcu.attribute("BAY1_PROT/PTOC1.StrVal.setMag.f", "SG")
     se = bcu.attribute("BAY1_PROT/PTOC1.StrVal.setMag.f", "SE")
     assert sg is not None and se is not None and sg is not se
-    assert se.mms_path == "PTOC1$SE$StrVal$setMag$f"
+    assert se.object_ref == ObjectRef("BAY1_PROT", "PTOC1", ("StrVal", "setMag", "f"), "SE")
     assert [a.fc for a in bcu.attributes_for("BAY1_PROT/PTOC1.OpDlTmms.setVal")] == ["SG", "SE"]
     # the SE copy directly follows its SG attribute in the DO
     names = [(c.name, c.fc) for c in bcu.do("BAY1_PROT/PTOC1.OpDlTmms").attributes]
@@ -229,15 +230,16 @@ def test_unknown_doi_is_a_warning() -> None:
 
 
 def test_datasets(bcu: ExpectedServer) -> None:
-    assert [d.mms_ref for d in bcu.datasets] == [
-        "BCU1CTRL/LLN0$dsStatus", "BCU1CTRL/LLN0$dsMeas", "BAY1_PROT/LLN0$dsProt", "BAY1_PROT/LLN0$dsGoose"]
+    assert [d.dataset_ref for d in bcu.datasets] == [
+        DatasetRef("BCU1CTRL", "LLN0", "dsStatus"), DatasetRef("BCU1CTRL", "LLN0", "dsMeas"),
+        DatasetRef("BAY1_PROT", "LLN0", "dsProt"), DatasetRef("BAY1_PROT", "LLN0", "dsGoose")]
     ds = bcu.dataset("BCU1CTRL/LLN0.dsMeas")
-    assert ds is bcu.dataset("BCU1CTRL/LLN0$dsMeas")
-    assert (ds.mms_name, ds.ref, ds.domain) == ("LLN0$dsMeas", "BCU1CTRL/LLN0.dsMeas", "BCU1CTRL")
+    assert ds is bcu.dataset("dsMeas")
+    assert (ds.ln_name, ds.name, ds.ref, ds.domain) == ("LLN0", "dsMeas", "BCU1CTRL/LLN0.dsMeas", "BCU1CTRL")
     assert ds.resolved
     m = ds.members[1]
-    assert (m.ref, m.fc, m.mms_ref) == ("BCU1CTRL/MMXU1.PhV.phsA.cVal.mag.f", "MX",
-                                        "BCU1CTRL/MMXU1$MX$PhV$phsA$cVal$mag$f")
+    assert (m.ref, m.fc, m.object_ref) == ("BCU1CTRL/MMXU1.PhV.phsA.cVal.mag.f", "MX",
+                                           ObjectRef("BCU1CTRL", "MMXU1", ("PhV", "phsA", "cVal", "mag", "f"), "MX"))
     assert m.resolved and m.target is bcu.attribute("BCU1CTRL/MMXU1.PhV.phsA.cVal.mag.f")
     whole_sdo = ds.members[2]
     assert whole_sdo.ref == "BCU1CTRL/MMXU1.PhV.phsB" and isinstance(whole_sdo.target, ExpectedDO)
@@ -289,21 +291,19 @@ def test_indexed_rcb_instances_and_client_mapping(bcu: ExpectedServer) -> None:
     assert [r.name for r in inst] == ["brcbStatus01", "brcbStatus02", "brcbStatus03"]
     assert [r.index for r in inst] == [1, 2, 3]
     r1, r2, r3 = inst
-    assert r1.mms_ref == "BCU1CTRL/LLN0$BR$brcbStatus01"
     assert r1.ref == "BCU1CTRL/LLN0.BR.brcbStatus01"
     assert r1.fc == "BR" and r1.buffered
     assert [c.ied_name for c in r1.clients] == ["SM1"]
     assert [c.ied_name for c in r2.clients] == ["GW1"]
     assert r3.clients == []
     assert bcu.rcb("brcbStatus02") is r2
-    assert bcu.rcb("BCU1CTRL/LLN0$BR$brcbStatus02") is r2
     assert bcu.rcb("BCU1CTRL/LLN0.BR.brcbStatus02") is r2
 
 
 def test_rcb_attributes(bcu: ExpectedServer) -> None:
     r = bcu.rcb("brcbStatus01")
-    assert r.rpt_id == "BCU1_Status" and r.effective_rpt_id == "BCU1_Status"
-    assert r.dat_set == "BCU1CTRL/LLN0$dsStatus"
+    assert r.rpt_id == "BCU1_Status"
+    assert r.dat_set_dataset == DatasetRef("BCU1CTRL", "LLN0", "dsStatus")
     assert r.dat_set_ref == "BCU1CTRL/LLN0.dsStatus"
     assert r.dataset is bcu.dataset("BCU1CTRL/LLN0.dsStatus")
     assert (r.conf_rev, r.buf_time, r.intg_pd) == (1, 100, 0)
@@ -317,7 +317,7 @@ def test_rcb_attributes(bcu: ExpectedServer) -> None:
 def test_unindexed_and_unbuffered_rcb(bcu: ExpectedServer) -> None:
     (u,) = bcu.rcbs_of("urcbMeas")
     assert (u.name, u.index, u.fc, u.indexed) == ("urcbMeas", None, "RP", False)
-    assert u.mms_ref == "BCU1CTRL/LLN0$RP$urcbMeas"
+    assert u.ref == "BCU1CTRL/LLN0.RP.urcbMeas"
     assert u.trg_ops == 1 + 8 + 16
     # bufOvfl/entryID only apply to BRCBs
     assert u.opt_fields == {"seqNum", "timeStamp", "dataSet", "reasonCode"}
@@ -327,8 +327,8 @@ def test_unindexed_and_unbuffered_rcb(bcu: ExpectedServer) -> None:
 
 def test_rcb_in_ld_with_ld_name(bcu: ExpectedServer) -> None:
     p1, p2 = bcu.rcbs_of("brcbProt")
-    assert p1.mms_ref == "BAY1_PROT/LLN0$BR$brcbProt01"
-    assert p1.dat_set == "BAY1_PROT/LLN0$dsProt"
+    assert p1.ref == "BAY1_PROT/LLN0.BR.brcbProt01"
+    assert p1.dat_set_dataset == DatasetRef("BAY1_PROT", "LLN0", "dsProt")
     assert p1.conf_rev == 2
     assert p1.opt_fields_int == 255
     assert [c.ied_name for c in p1.clients] == ["SM1"] and p2.clients == []
@@ -337,7 +337,7 @@ def test_rcb_in_ld_with_ld_name(bcu: ExpectedServer) -> None:
 def test_ed1_rcbs(ed1: ExpectedServer) -> None:
     assert [r.name for r in ed1.rcbs] == ["rcbEvents01", "rcbEvents02", "brcbAnalogs"]
     b = ed1.rcb("brcbAnalogs")
-    assert b.rpt_id is None and b.effective_rpt_id == "TEMPLATELD0/LLN0$BR$brcbAnalogs"
+    assert b.rpt_id is None and b.ref == "TEMPLATELD0/LLN0.BR.brcbAnalogs"
     assert not b.has_owner
     assert b.opt_fields == {"seqNum", "timeStamp", "entryID"}
 
@@ -368,13 +368,13 @@ def test_more_client_lns_than_instances_is_a_warning() -> None:
 def test_sgcb_and_other_control_blocks(bcu: ExpectedServer) -> None:
     (sgcb,) = bcu.sgcbs
     assert (sgcb.num_of_sgs, sgcb.act_sg, sgcb.domain) == (2, 1, "BAY1_PROT")
-    assert sgcb.mms_ref == "BAY1_PROT/LLN0$SP$SGCB" and sgcb.ref == "BAY1_PROT/LLN0.SGCB"
+    assert sgcb.ref == "BAY1_PROT/LLN0.SGCB"
     assert bcu.ln("BAY1_PROT/LLN0").sgcb is sgcb
     (lcb,) = bcu.lcbs
-    assert (lcb.kind, lcb.fc, lcb.mms_ref) == ("LCB", "LG", "BCU1CTRL/LLN0$LG$lcbEvents")
+    assert (lcb.kind, lcb.fc, lcb.ref) == ("LCB", "LG", "BCU1CTRL/LLN0.LG.lcbEvents")
     assert lcb.details["logRef"] == "BCU1CTRL/LLN0$EventLog"
     (gocb,) = bcu.gocbs
-    assert (gocb.kind, gocb.mms_ref, gocb.dat_set_name) == ("GoCB", "BAY1_PROT/LLN0$GO$gcbTrip", "dsGoose")
+    assert (gocb.kind, gocb.ref, gocb.dat_set_name) == ("GoCB", "BAY1_PROT/LLN0.GO.gcbTrip", "dsGoose")
     assert gocb.details["appID"] == "BCU1_PROT_Trip"
     assert gocb.details["address"]["MAC-Address"] == "01-0C-CD-01-00-11"
     assert (gocb.details["minTime"], gocb.details["maxTime"]) == (4, 1000)
@@ -466,5 +466,5 @@ def test_array_attributes() -> None:
                         '<DAI name="db"><Val>1000</Val></DAI>\n              <DAI name="hist" ix="2"><Val>7.5</Val></DAI>')
     srv = expand_server(load_scl(text), "BCU1")
     a = srv.attribute("BCU1CTRL/MMXU1.TotW.hist")
-    assert a.count == 4 and a.mms_type == MmsType("array", 4, MmsType("float", 32))
+    assert a.count == 4 and a.value_type == ValueType("array", 4, ValueType("float", 32))
     assert a.element_values == {2: "7.5"}

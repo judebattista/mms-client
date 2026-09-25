@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from mms_client.cli import registry
-from mms_client.cli.registry import Needs, UsageError
+from ied_client.cli import registry
+from ied_client.cli.registry import Needs, UsageError
 
 # SPEC §6.2, plus the shell's own commands and ORG-4's `origin`.
 SPEC_COMMANDS = [

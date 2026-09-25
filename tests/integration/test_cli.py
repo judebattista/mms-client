@@ -10,12 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from mms_client.cli.context import CliContext
-from mms_client.cli.main import main
-from mms_client.cli.options import Options
-from mms_client.cli.render import Output
-from mms_client.cli.shell import Shell
-from mms_client.core.safety import Scripted
+from ied_client.cli.context import CliContext
+from ied_client.cli.main import main
+from ied_client.cli.options import Options
+from ied_client.cli.render import Output
+from ied_client.cli.shell import Shell
+from ied_client.core.safety import Scripted
 
 pytestmark = pytest.mark.integration
 LD = "SIMCTRL"

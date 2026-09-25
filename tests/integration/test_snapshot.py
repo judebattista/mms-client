@@ -6,12 +6,12 @@ import json
 
 import pytest
 
-from mms_client.core import readwrite, reports
-from mms_client.core.results import Status
-from mms_client.core.safety import Policy, Scripted
-from mms_client.core.session import Session, Target
-from mms_client.verify.diff import IgnoreRules, diff_snapshots
-from mms_client.verify.snapshot import Snapshot, capture
+from ied_client.core import readwrite, reports
+from ied_client.core.results import Status
+from ied_client.core.safety import Policy, Scripted
+from ied_client.core.session import Session, Target
+from ied_client.verify.diff import IgnoreRules, diff_snapshots
+from ied_client.verify.snapshot import Snapshot, capture
 
 pytestmark = pytest.mark.integration
 LD = "SIMCTRL"
