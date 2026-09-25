@@ -7,7 +7,7 @@ from typing import Any
 
 from rich.text import Text
 
-from mms_client.core.identity import Confidence, collect_identity
+from mms_client.core.identity import Confidence, identify
 
 from ..context import CliContext
 from ..registry import Needs, UsageError, command
@@ -201,13 +201,7 @@ def info(ctx: CliContext, args) -> CommandResult:
     s = ctx.require_session()
     model = s.model()
     dev = s.target.device
-    override = dev.identity if dev is not None and not dev.identity.is_empty() else None
-    scl_edition = None
-    ref_fn = getattr(s.reference, "scl_edition", None)
-    if callable(ref_fn):
-        scl_edition = ref_fn()
-    rep = collect_identity(s.require_client(), model, override=override, scl_edition=scl_edition, log=s.log)
-    s.identity = rep
+    rep = identify(s)  # keeps an edition the operator gave earlier in the session (IDN-6)
     ident = rep.to_json()
     data = {
         "identity": ident,

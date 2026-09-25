@@ -26,7 +26,7 @@ def default_log_dir() -> Path:
 class SessionLog:
     """Append-only JSONL log. One entry per line: ``{"seq", "ts", "kind", ...}``.
 
-    Kinds: session-start, command, request (summarised), write, control, rcb, check, file,
+    Kinds: session-start, command, request (summarised), write, restore, control, rcb, check, file,
     report (sampled), diagnose, identity, note, error, session-end.
     """
 
@@ -97,10 +97,39 @@ def read_log(path: Path) -> list[dict[str, Any]]:
     return out
 
 
-def restorable_writes(entries: list[dict[str, Any]]) -> Iterator[LoggedWrite]:
-    """Successful writes in the log, newest first (LOG-2). Controls are never included (CTL-10)."""
+def session_id_of(entries: list[dict[str, Any]]) -> str | None:
+    """The session id recorded in a log's session-start entry."""
+    return next((e.get("session_id") for e in entries if e.get("kind") == "session-start"), None)
+
+
+def restored_seqs(markers: list[dict[str, Any]], source_session: str | None, *, same_log: bool) -> set[int]:
+    """Sequence numbers of the source log's writes that a restore has already put back successfully.
+
+    ``markers`` are log entries. Since Version 1.01 a restore records each outcome as a ``restore`` entry
+    naming the source session (the writes it makes carry the same fields, but only the ``restore`` entry
+    says whether the value was really put back). Logs written before Version 1.01 have ``write`` entries
+    with ``restored_from`` and no session: those count only in the log they are in (``same_log``).
+    """
+    done: set[int] = set()
+    for e in markers:
+        if not e.get("ok") or e.get("restored_from") is None:
+            continue
+        if "restored_from_session" in e:
+            counts = e.get("kind") == "restore" and e["restored_from_session"] == source_session
+        else:
+            counts = e.get("kind") == "write" and same_log
+        if counts:
+            done.add(int(e["restored_from"]))
+    return done
+
+
+def restorable_writes(entries: list[dict[str, Any]], *, already_restored: set[int] | frozenset[int] = frozenset()) -> Iterator[LoggedWrite]:
+    """Successful writes in the log, newest first (LOG-2). Controls are never included (CTL-10); nor are
+    the writes that a restore made, or writes that a restore has already put back (``already_restored``)."""
     for e in reversed(entries):
         if e.get("kind") != "write" or not e.get("ok") or e.get("restored_from") is not None:
+            continue
+        if e.get("seq") in already_restored:
             continue
         if e.get("write_kind") == "write-test":  # wrote the current value back: nothing to undo
             continue

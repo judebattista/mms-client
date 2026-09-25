@@ -49,7 +49,8 @@ def _check_args(p, oneshot: bool) -> None:
     p.add_argument("--kind", choices=("scd", "cid", "snapshot"), help="kind of the reference file (guessed from the name)")
     p.add_argument("--ied", metavar="NAME", help="IED name inside the SCD")
     p.add_argument("--device-scl", nargs="?", const="", metavar="NAME",
-                   help="use an SCL file stored on the device as a (labelled) reference (VER-8)")
+                   help="use an SCL file stored on the device as a (labelled) reference (VER-8); without a reference, "
+                   "an interactive check offers these files by itself, a non-interactive one needs this option")
     p.add_argument("--test-writes", action="store_true", help="write current values back to check that writable attributes accept writes")
     p.add_argument("--write-filter", metavar="GLOB", help="limit --test-writes to references matching GLOB")
     p.add_argument("--try-reports", action="store_true", help="briefly enable the client's RCBs and wait for a report")
@@ -75,7 +76,8 @@ def check(ctx: CliContext, args) -> CommandResult:
         ref = load_reference(args.reference, kind=args.kind, ied=args.ied, host=s.target.host, live_model=s.model())
     else:
         try:
-            ref = reference_for(s, None, kind=args.kind, ied=args.ied, device_supplied=args.device_scl is not None,
+            # VER-8: without a reference, an interactive run looks for SCL files on the device and offers them
+            ref = reference_for(s, None, kind=args.kind, ied=args.ied, device_supplied=True if args.device_scl is not None else None,
                                 device_file=args.device_scl or None)
         except (ValueError, OSError) as e:
             raise UsageError(f"cannot use the reference: {e}") from e

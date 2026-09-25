@@ -18,7 +18,7 @@ from typing import Any
 
 from mms_client import codes
 from mms_client.adapter import ConnectError, ServiceError
-from mms_client.core.identity import collect_identity
+from mms_client.core.identity import identify
 from mms_client.core.results import Category, CheckResult, Status
 from mms_client.core.safety import ConfirmationDeclined, PolicyError
 from mms_client.core.session import Session
@@ -317,11 +317,7 @@ def _run(session: Session, rep: DiagnosisReport, *, controls: bool, control_ref:
     rep.layers.append(ident_l)
     try:
         model = session.model()
-        ident = collect_identity(
-            session.require_client(), model, override=getattr(t.device, "identity", None),
-            scl_edition=getattr(session.reference, "scl_edition", lambda: None)(), log=session.log,
-        )
-        session.identity = ident
+        ident = identify(session)
     except ServiceError as e:
         ident_l.status = Status.FAIL
         ident_l.results.append(CheckResult("identity", "Device identity", Status.FAIL, COMM, error=e.error, message=str(e)))
@@ -359,9 +355,32 @@ def _run(session: Session, rep: DiagnosisReport, *, controls: bool, control_ref:
                 f"{bad[0].subject}: {bad[0].message}. A client configured from that reference will fail on these objects.",
                 "fact", bad[0].error.key if bad[0].error else None, "model"))
             return
+    elif ref is not None and getattr(ref, "snapshot", None) is not None:
+        from mms_client.verify.diff import model_differences
+
+        diffs = model_differences(ref.snapshot, model)
+        if diffs:
+            model_l.status = Status.FAIL
+            first = diffs[0]
+            key = {"removed": "model-object-missing", "added": "model-object-unexpected"}.get(first.change, "model-type-mismatch")
+            model_l.results.append(CheckResult(
+                "snapshot-structure", "Model matches the snapshot", Status.FAIL, CONF, subject=first.key,
+                message=f"{len(diffs)} difference(s) in the model tree, e.g. {first.key}: {first.change}",
+                evidence={"differences": [d.to_json() for d in diffs[:100]], "count": len(diffs)},
+                error=codes.check(key), certainty="fact"))
+            _stop(rep, "model", Verdict(
+                f"The device's model differs from the snapshot ({ref.label}): {len(diffs)} difference(s), e.g. "
+                f"{first.key} was {first.change}. A client configured for the snapshotted model will fail on these objects.",
+                "fact", f"check:{key}", "model"))
+            return
+        model_l.results.append(CheckResult("snapshot-structure", "Model matches the snapshot", Status.PASS, CONF,
+                                           message=f"model tree matches {ref.label}"))
     elif ref is None:
         model_l.results.append(CheckResult("model-reference", "Model compared with a reference", Status.NOT_RUN, CONF,
                                            reason="no reference (SCD/CID/snapshot) for this device"))
+    else:
+        model_l.results.append(CheckResult("model-reference", "Model compared with a reference", Status.NOT_RUN, CONF,
+                                           reason=f"the reference ({getattr(ref, 'label', ref)}) has no model to compare"))
     # -- 7. reports (the client's RCBs)
     rpt = LayerOutcome("reports", Status.PASS)
     rep.layers.append(rpt)
@@ -447,13 +466,12 @@ def _client_rcb_results(session: Session) -> list[CheckResult]:
     if not rels:
         return [CheckResult("client-rcbs", "The clients' RCBs are available", Status.NOT_RUN, COMM,
                             reason="no reference or inventory says which RCBs the clients use")]
-    from mms_client.core.reports import free_reason, list_rcbs
+    from mms_client.core.reports import free_reason, list_rcbs, same_rcb
 
     states = list_rcbs(session)
     for rel in rels:
         for name in rel.rcbs:
-            t = name.replace("$", ".")
-            st = next((s for s in states if s.cb.reference == t or s.cb.mms_reference == name), None)
+            st = next((s for s in states if same_rcb(name, s.cb)), None)
             subject = f"{name} for {rel.client}"
             if st is None or st.values is None:
                 out.append(CheckResult("client-rcb-missing", "The client's RCBs exist", Status.FAIL, COMM, subject=subject,

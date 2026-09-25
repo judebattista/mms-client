@@ -11,13 +11,16 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mms_client.adapter import AccessError, ServiceError
 from mms_client.codes import ErrorInfo
 
 from .model import DeviceModel
 from .refs import ObjectRef
+
+if TYPE_CHECKING:
+    from .session import Session
 
 
 class Confidence(StrEnum):
@@ -56,6 +59,21 @@ class Attr:
 
 
 UNKNOWN_ATTR = Attr(None, "none", Confidence.UNKNOWN)
+
+
+@dataclass(frozen=True, slots=True)
+class SclEdition:
+    """An IED's edition according to an SCL file (IDN-2 step 2).
+
+    ``confirmed`` only when the file states it for this IED: the IED's own ``originalSclVersion``, or a
+    file that describes this IED alone (CID/ICD/IID). The schema version of an SCD that holds several IEDs
+    says which edition the SCD was written in, not which edition each IED implements (mixed-edition SCDs,
+    VER-4), so an edition taken from it is only inferred (IDN-3).
+    """
+
+    edition: str
+    reason: str
+    confirmed: bool
 
 
 @dataclass(slots=True)
@@ -135,7 +153,8 @@ def collect_identity(
     model: DeviceModel,
     *,
     override: Any = None,  # inventory.IdentityOverride
-    scl_edition: tuple[str, str] | None = None,  # (edition, reason) from the SCL reference, IDN-2 step 2
+    scl_edition: SclEdition | None = None,  # from the SCL reference, IDN-2 step 2
+    operator_edition: Attr | None = None,  # the operator's answer earlier in this session, IDN-2 step 5
     log: Any = None,
 ) -> IdentityReport:
     """Read every identity source (IDN-1) and determine vendor/model/firmware/edition (IDN-2/3)."""
@@ -163,7 +182,27 @@ def collect_identity(
     if log is not None:
         log.write("identity", sources=[s.to_json() for s in rep.sources])
     _decide(rep, override)
-    determine_edition(rep, model, override=override, scl_edition=scl_edition)
+    determine_edition(rep, model, override=override, scl_edition=scl_edition, operator_edition=operator_edition)
+    return rep
+
+
+def identify(session: Session, *, log: bool = True) -> IdentityReport:
+    """Collect the identity of the session's device and store it in ``session.identity``.
+
+    Every command that (re)reads the identity goes through here, so that the inventory override, the SCL
+    reference and an edition the operator gave earlier in the session (IDN-4) are always taken into account.
+    Rebuilding the identity must not lose the operator's answer (IDN-6).
+    """
+    ref_fn = getattr(session.reference, "scl_edition", None)
+    rep = collect_identity(
+        session.require_client(),
+        session.model(),
+        override=getattr(session.target.device, "identity", None),
+        scl_edition=ref_fn() if callable(ref_fn) else None,
+        operator_edition=session.operator_edition,
+        log=session.log if log else None,
+    )
+    session.identity = rep
     return rep
 
 
@@ -240,9 +279,15 @@ def _decide(rep: IdentityReport, override: Any) -> None:
 
 
 def determine_edition(
-    rep: IdentityReport, model: DeviceModel | None, *, override: Any = None, scl_edition: tuple[str, str] | None = None
+    rep: IdentityReport,
+    model: DeviceModel | None,
+    *,
+    override: Any = None,
+    scl_edition: SclEdition | None = None,
+    operator_edition: Attr | None = None,
 ) -> None:
-    """IDN-2 precedence: inventory → SCL → ldNs → model heuristics → (ask, done elsewhere)."""
+    """IDN-2 precedence: inventory → SCL → ldNs → model heuristics → the operator (asked elsewhere; an
+    answer given earlier in the session is ``operator_edition``)."""
     ev = rep.edition_evidence
     ov = getattr(override, "edition", None) if override is not None else None
     ns_eds = {ld: edition_from_ldns(ns) for ld, ns in rep.ld_namespaces.items()}
@@ -255,7 +300,9 @@ def determine_edition(
         rep.edition = Attr(Edition(ov), "inventory", Confidence.OPERATOR)
         return
     if scl_edition:
-        rep.edition = Attr(Edition(scl_edition[0]), f"SCL ({scl_edition[1]})", Confidence.CONFIRMED)
+        conf = Confidence.CONFIRMED if scl_edition.confirmed else Confidence.INFERRED
+        rep.edition = Attr(Edition(scl_edition.edition), f"SCL ({scl_edition.reason})", conf)
+        ev.append(f"SCL: {scl_edition.edition} ({scl_edition.reason}; {conf.value})")
         return
     found = {e for e in ns_eds.values() if e is not None}
     if len(found) == 1:
@@ -273,6 +320,10 @@ def determine_edition(
         return
     if heuristics:
         rep.edition = Attr(Edition.ED2, "model heuristics (Ed2-only attributes present)", Confidence.INFERRED)
+        return
+    if operator_edition is not None and operator_edition.confidence is Confidence.OPERATOR:
+        rep.edition = operator_edition
+        ev.append(f"operator answered {getattr(operator_edition.value, 'value', operator_edition.value)} earlier in this session")
         return
     rep.edition = Attr(Edition.UNKNOWN, "none", Confidence.UNKNOWN)
 

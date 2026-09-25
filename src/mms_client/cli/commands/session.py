@@ -123,6 +123,9 @@ def entry_summary(e: dict[str, Any]) -> str:
     if k == "write":
         s = f"{e.get('ref')} [{e.get('fc')}] {fmt_json_value(e.get('before'), 40)} -> {fmt_json_value(e.get('requested', e.get('after')), 40)}"
         return s + ("" if e.get("ok") else f"  FAILED {code_label(e.get('error'))}")
+    if k == "restore":
+        s = f"{e.get('ref')} [{e.get('fc')}] restored to {fmt_json_value(e.get('after'), 40)} (undoing #{e.get('restored_from')})"
+        return s + ("" if e.get("ok") else f"  FAILED {code_label(e.get('error'))}")
     if k == "control":
         out = e.get("outcome") or {}
         ref = (out.get("plan") or {}).get("reference") or e.get("reference") or (e.get("plan") or {}).get("reference") or ""

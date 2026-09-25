@@ -16,13 +16,14 @@ from .session import Session
 SCL_SUFFIXES = (".cid", ".icd", ".iid", ".scd", ".xml", ".ssd", ".sed")
 
 
-def list_files(session: Session, directory: str = "") -> list[FileEntry]:
+def list_files(session: Session, directory: str = "", *, remember_error: bool = True) -> list[FileEntry]:
     client = session.require_client()
     try:
         entries = client.get_file_directory(directory)
     except ServiceError as e:
         session.log.write("file", action="dir", path=directory or "/", ok=False, error=e.error)
-        session.remember_error(e.error, {"service": "file-dir"}, str(e))
+        if remember_error:
+            session.remember_error(e.error, {"service": "file-dir"}, str(e))
         raise
     session.log.write("file", action="dir", path=directory or "/", ok=True, count=len(entries))
     return entries
@@ -91,9 +92,10 @@ def get_file(
 
 
 def find_scl_files(session: Session) -> list[FileEntry]:
-    """Candidate device-supplied SCL files (VER-8)."""
+    """Candidate device-supplied SCL files (VER-8). A device without file services has none; that is not
+    an error the operator asked about, so it does not become `explain last`."""
     try:
-        entries = list_files(session)
+        entries = list_files(session, remember_error=False)
     except ServiceError:
         return []
     return [e for e in entries if e.name.lower().endswith(SCL_SUFFIXES)]

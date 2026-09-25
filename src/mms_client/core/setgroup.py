@@ -11,7 +11,15 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from mms_client import codes
-from mms_client.adapter import AccessError, ServiceError, VarSpec, format_value, parse_text, value_to_json
+from mms_client.adapter import (
+    AccessError,
+    NotConnectedError,
+    ServiceError,
+    VarSpec,
+    format_value,
+    parse_text,
+    value_to_json,
+)
 from mms_client.codes import ErrorInfo
 
 from .model import ControlBlockInfo
@@ -93,7 +101,9 @@ def _write_field(session: Session, cb: ControlBlockInfo, name: str, value: Any) 
     client.write(cb.ld, f"{cb.ln}$SP$SGCB${name}", _field_spec(cb, name), value)
 
 
-def activate(session: Session, group: int, ld: str | None = None, *, confirm: bool = True) -> SgcbState:
+def activate(
+    session: Session, group: int, ld: str | None = None, *, confirm: bool = True, log_extra: dict[str, Any] | None = None
+) -> SgcbState:
     """Change the active setting group (writes ActSG; logged, restorable)."""
     cb = _sgcb_for(session, ld)
     before = show(session, cb.ld)[0]
@@ -124,6 +134,7 @@ def activate(session: Session, group: int, ld: str | None = None, *, confirm: bo
         after=after.values.get("ActSG"),
         ok=ok,
         error=err,
+        **(log_extra or {}),
     )
     if not ok:
         raise ServiceError("setgroup", ref, err)  # type: ignore[arg-type]
@@ -159,6 +170,7 @@ def edit(
     *,
     ld: str | None = None,
     confirm: bool = True,
+    log_extra: dict[str, Any] | None = None,
 ) -> EditResult:
     """Select group ``group`` for editing, write the SE values, confirm (CnfEdit), release."""
     client = session.require_client()
@@ -213,7 +225,7 @@ def edit(
             res.message = "a value was refused; the edit is discarded (not confirmed)"
             _write_field(session, cb, "EditSG", 0)
             session.drop_cleanup(key)
-            return _log_edit(session, res)
+            return _log_edit(session, res, log_extra)
         _write_field(session, cb, "CnfEdit", True)
         res.confirmed = True
         # verify: re-select the group and read the SE values back
@@ -232,10 +244,28 @@ def edit(
         res.error = e.error
         res.message = str(e)
         session.remember_error(e.error, {"service": "setgroup", "fc": "SE"}, str(e))
-    return _log_edit(session, res)
+        _end_edit(session, cb, key)
+    except BaseException:
+        # Declined confirmation, Ctrl-C, a tool error: end the edit session now. Left open, it would block
+        # other clients from editing settings until this session ends (RW-7).
+        _end_edit(session, cb, key)
+        raise
+    return _log_edit(session, res, log_extra)
 
 
-def _log_edit(session: Session, res: EditResult) -> EditResult:
+def _end_edit(session: Session, cb: ControlBlockInfo, key: str) -> None:
+    """Release the SGCB edit session (EditSG := 0). If that fails, the registered cleanup tries again at the
+    end of the session and reports what lingers."""
+    if not any(a.key == key for a in session.cleanups):
+        return
+    try:
+        _write_field(session, cb, "EditSG", 0)
+    except (ServiceError, NotConnectedError):
+        return
+    session.drop_cleanup(key)
+
+
+def _log_edit(session: Session, res: EditResult, log_extra: dict[str, Any] | None = None) -> EditResult:
     for item in res.items:
         session.log.write(
             "write",
@@ -249,5 +279,6 @@ def _log_edit(session: Session, res: EditResult) -> EditResult:
             ok=bool(item.get("ok")) and res.confirmed,
             applied=item.get("applied"),
             error=item.get("error"),
+            **(log_extra or {}),
         )
     return res

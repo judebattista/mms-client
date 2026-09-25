@@ -13,6 +13,7 @@ from typing import Any
 
 from mms_client import codes
 from mms_client.adapter import AccessError, MmsKind, ServiceError, VarSpec, value_to_json
+from mms_client.core.identity import SclEdition
 from mms_client.core.model import ControlBlockInfo, DeviceModel, dataset_ref_to_mms
 from mms_client.core.readwrite import values_equal
 from mms_client.core.refs import ObjectRef, RefError
@@ -120,11 +121,18 @@ class Reference:
     def describe(self) -> dict[str, Any]:
         return {"kind": self.kind, "path": str(self.path), "ied": self.ied_name, "label": self.label, "notes": self.notes}
 
-    def scl_edition(self) -> tuple[str, str] | None:
+    def scl_edition(self) -> SclEdition | None:
+        """The IED's edition according to this file; confirmed only if the file states it for this IED (IDN-3)."""
         if self.doc is None or self.ied_name is None:
             return None
         info = edition_of(self.doc, self.ied_name)
-        return info.edition, info.reason
+        if info.source == "ied-original-scl" or len(self.doc.ieds) == 1:
+            return SclEdition(info.edition, info.reason, confirmed=True)
+        return SclEdition(
+            info.edition,
+            f"{info.reason}; the file holds {len(self.doc.ieds)} IEDs and does not state {self.ied_name}'s own edition",
+            confirmed=False,
+        )
 
     def cdc_of(self, ref: ObjectRef) -> str | None:
         if self.expected is None:
@@ -478,9 +486,9 @@ def _scl_identity_checks(session: Session, ref: Reference) -> Iterator[CheckResu
         from mms_client.core.identity import edition_from_ldns
 
         ns_eds = {edition_from_ldns(ns) for ns in ident.ld_namespaces.values()} - {None}
-        if scl_ed and ns_eds and {e.value for e in ns_eds} != {scl_ed[0]}:
+        if scl_ed and ns_eds and {e.value for e in ns_eds} != {scl_ed.edition}:
             yield _r("edition-mismatch", "Edition consistent between device and reference", Status.WARN, CONF,
-                     message=f"reference says {scl_ed[0]} ({scl_ed[1]}); device namespaces suggest {', '.join(sorted(e.value for e in ns_eds))}",
+                     message=f"reference says {scl_ed.edition} ({scl_ed.reason}); device namespaces suggest {', '.join(sorted(e.value for e in ns_eds))}",
                      evidence={"ldNs": inferred}, error=codes.check("edition-mismatch"))
 
 
@@ -564,11 +572,15 @@ def reference_for(
     *,
     kind: str | None = None,
     ied: str | None = None,
-    device_supplied: bool = False,
+    device_supplied: bool | None = None,
     device_file: str | None = None,
 ) -> Reference | None:
     """Pick the reference (VER-1 order): an explicit file, else the inventory's reference for the
-    device, else (when ``device_supplied``) an SCL file offered by the device (VER-8)."""
+    device, else an SCL file stored on the device (VER-8).
+
+    ``device_supplied``: True looks on the device (and, non-interactively, uses ``device_file``); False never
+    does; None (the default) looks and offers what it finds only when the operator can be asked. A
+    non-interactive run never lists the device's files on its own (IDN-5: it cannot ask anyway)."""
     if path is not None:
         k = kind or Reference.guess_kind(path)
         return Reference.load(k, path, ied, live_model=session.model(), host=session.target.host)
@@ -576,6 +588,6 @@ def reference_for(
     if dev is not None and dev.reference is not None:
         r = dev.reference
         return Reference.load(r.kind, r.path, ied or r.ied, live_model=session.model(), host=session.target.host)
-    if device_supplied or device_file:
+    if device_supplied or device_file or (device_supplied is None and session.ui.interactive):
         return Reference.from_device(session, device_file)
     return None

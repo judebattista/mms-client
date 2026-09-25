@@ -56,6 +56,8 @@ def render_plan(out: Output, plan: ControlPlan, *, title: str = "Pre-flight chec
     ]
     if plan.sbo_timeout_ms is not None:
         rows.append(("sboTimeout", f"{plan.sbo_timeout_ms} ms"))
+    if plan.prior_select_age_s is not None:
+        rows.append(("selection", f"made {plan.prior_select_age_s:.1f} s ago with `select`: operate only, no new select (CTL-5)"))
     for name, v in plan.authority.values.items():
         meaning = v.get("meaning")
         rows.append((name, f"{fmt(v.get('value'))}" + (f" ({meaning})" if meaning else "") + f"   ({v.get('ref')})"))
@@ -127,6 +129,8 @@ def operate(ctx: CliContext, args) -> CommandResult:
 
     def text(out: Output) -> None:
         out.table(["step", "result", "time", "detail"], _step_rows(outcome.steps), title="Sequence (CTL-2, CTL-3)")
+        if outcome.used_earlier_select:
+            out.note("Operated on the selection made earlier with `select` (no new select was sent).")
         if outcome.termination is not None:
             t = outcome.termination
             detail = "positive" if t.positive else f"NEGATIVE, AddCause {t.add_cause}"

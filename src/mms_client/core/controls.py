@@ -126,6 +126,7 @@ class ControlPlan:
     sbo_timeout_ms: int | None = None
     oper_timeout_ms: int | None = None
     warnings: list[str] = field(default_factory=list)
+    prior_select_age_s: float | None = None  # made earlier with `select` (CTL-5): operate uses it, no new select
 
     @property
     def ctl_model_name(self) -> str:
@@ -147,6 +148,8 @@ class ControlPlan:
             f"  check:      interlock={'on' if self.interlock_check else 'OFF'}, synchrocheck={'on' if self.synchro_check else 'OFF'}",
             f"  test flag:  {'SET' if self.test else 'not set'}",
         ]
+        if self.prior_select_age_s is not None:
+            lines.append(f"  selection:  made {self.prior_select_age_s:.1f} s ago with `select`; operate only (no new select)")
         for name, v in self.authority.values.items():
             lines.append(f"  {name + ':':11} {format_value(v.get('value'))}  ({v.get('ref')})")
         for w in self.warnings:
@@ -170,6 +173,7 @@ class ControlPlan:
             "authority": self.authority.to_json(),
             "sbo_timeout_ms": self.sbo_timeout_ms,
             "oper_timeout_ms": self.oper_timeout_ms,
+            "prior_select_age_s": round(self.prior_select_age_s, 3) if self.prior_select_age_s is not None else None,
             "warnings": self.warnings,
         }
 
@@ -237,6 +241,27 @@ def _read_opt(session: Session, ref: ObjectRef, fc: str) -> tuple[Any, VarSpec |
     except ServiceError:
         return None, spec
     return (None if isinstance(v, AccessError) else v), spec
+
+
+def read_ctl_model(session: Session, ref: ObjectRef) -> int:
+    """The object's ctlModel [CF]. A failed read raises the device's own error (CLI-7); a ctlModel that is
+    missing from the model or has an unexpected type is the tool's finding (``tool:ctlmodel-unusable``)."""
+    cm = ref.child("ctlModel")
+    try:
+        node = session.model().resolve(cm).node
+    except RefError:
+        node = None
+    if node is None or "CF" not in node.specs:
+        raise PolicyError(codes.tool("ctlmodel-unusable"),
+                          f"{cm.iec()} [CF] is not in the device's model: the control sequence cannot be chosen (CTL-2)")
+    target = f"{ref.ld}/{cm.mms_item('CF')}"
+    v = session.require_client().read(ref.ld, cm.mms_item("CF"), node.specs["CF"])  # ServiceError propagates as is
+    if isinstance(v, AccessError):
+        raise ServiceError("read", target, v.error, "ctlModel could not be read")
+    if not isinstance(v, int) or isinstance(v, bool):
+        raise PolicyError(codes.tool("ctlmodel-unusable"),
+                          f"{cm.iec()} [CF] reads as {format_value(v)!r}, not an integer: the control sequence cannot be chosen")
+    return v
 
 
 def read_authority(session: Session, ref: ObjectRef) -> AuthorityState:
@@ -319,9 +344,7 @@ def plan_control(
         )
     if not interlock_check or not synchro_check:
         session.policy.require_expert("turning interlock/synchrocheck checks off (CTL-9)")
-    ctl_model_v, _ = _read_opt(session, ref.child("ctlModel"), "CF")
-    if not isinstance(ctl_model_v, int):
-        raise ServiceError("read", f"{ref.iec()}.ctlModel", codes.ied_error(22), "ctlModel could not be read")
+    ctl_model_v = read_ctl_model(session, ref)
     if ctl_model_v == 0 and not allow_status_only:
         raise PolicyError(codes.tool("status-only-control"), f"{ref.iec()} has ctlModel status-only: it cannot be controlled")
     oc = ensure_or_cat(session, or_cat)
@@ -354,9 +377,27 @@ def plan_control(
         target_device=session.device_name,
     )
     plan.warnings = blocking_warnings(plan)
+    prior: SelectState | None = session.selected.get(ref.iec()) if ctl_model_v in (2, 4) else None
+    if prior is not None:
+        plan.prior_select_age_s = time.monotonic() - prior.selected_at
+        remaining = prior.remaining_s()
+        if remaining is not None and remaining <= 0:
+            plan.warnings.append(
+                f"the selection made {plan.prior_select_age_s:.1f} s ago has probably expired (sboTimeout "
+                f"{plan.sbo_timeout_ms} ms): the device is expected to refuse the operate (object-not-selected)"
+            )
+        if ctl_model_v == 4 and not _same_value(prior.plan.target, plan.target):
+            plan.warnings.append(
+                f"the selection was made with ctlVal {describe_value(cdc, prior.plan.target)}, this operate sends "
+                f"{describe_value(cdc, plan.target)}: the device will likely refuse it"
+            )
     if not interlock_check or not synchro_check:
         plan.warnings.append("interlock and/or synchrocheck checks are OFF (expert mode; this is logged)")
     return plan
+
+
+def _same_value(a: Value, b: Value) -> bool:
+    return value_to_json(a) == value_to_json(b)
 
 
 def _normalise_control_text(cdc: str, text: str) -> str:
@@ -377,10 +418,12 @@ class ControlOutcome:
     ok: bool = False
     error: ErrorInfo | None = None
     message: str = ""
+    used_earlier_select: bool = False  # CTL-5: operated on the selection made with `select`
 
     def to_json(self) -> dict:
         return {
             "plan": self.plan.to_json(),
+            "used_earlier_select": self.used_earlier_select,
             "steps": [s.to_json() for s in self.steps],
             "termination": self.termination.to_json() if self.termination else None,
             "termination_wait_s": round(self.termination_wait_s, 6) if self.termination_wait_s is not None else None,
@@ -438,15 +481,20 @@ def execute(session: Session, plan: ControlPlan, *, confirm: bool = True, termin
         "ln_class": ln_class_of(plan.ref.ln) if plan.ref.ln else None,
         "tags": {"or_cat": codes.OR_CATS.get(plan.or_cat, str(plan.or_cat)), "test": "yes" if plan.test else "no"},
     }
+    # CTL-5: a selection made earlier with `select` is used, not repeated (a second select of a selected
+    # object is refused by the device). It is consumed by this operate whatever the outcome.
+    prior = session.selected.pop(plan.ref.iec(), None) if m in (2, 4) else None
+    out.used_earlier_select = prior is not None
     try:
-        if m == 2:
+        if m == 2 and prior is None:
             s = ctl.select()
             out.steps.append(s)
             if not s.ok:
-                out.error = step_error(s) if s.add_cause or s.ied_error.code else codes.add_cause(3)
+                # An empty SBO value carries no reason: report the tool's own code, not an invented AddCause.
+                out.error = step_error(s)
                 out.message = "select refused (the device returned an empty SBO value)"
                 return _finish(session, out, ctx | {"service": "select"})
-        elif m == 4:
+        elif m == 4 and prior is None:
             s = ctl.select_with_value(plan.ctl_val_spec, plan.target)
             out.steps.append(s)
             if not s.ok:
@@ -615,14 +663,14 @@ def authority_probe(
     for ref in targets:
         row = ProbeRow(ref, None, authority=read_authority(session, ref))
         rows.append(row)
-        ctl_model, _ = _read_opt(session, ref.child("ctlModel"), "CF")
-        row.ctl_model = ctl_model if isinstance(ctl_model, int) else None
-        if row.ctl_model in (0, 1, 3):
-            row.note = "not probeable (no select step: " + codes.CTL_MODELS[row.ctl_model] + ")"
-            row.cells = [ProbeCell(c, None, note="not probeable") for c in cats]
+        try:
+            row.ctl_model = read_ctl_model(session, ref)
+        except (ServiceError, PolicyError) as e:
+            row.note = f"ctlModel unreadable ({e.error})"
             continue
-        if row.ctl_model is None:
-            row.note = "ctlModel unreadable"
+        if row.ctl_model not in (2, 4):
+            row.note = "not probeable (no select step: " + codes.CTL_MODELS.get(row.ctl_model, f"ctlModel {row.ctl_model}") + ")"
+            row.cells = [ProbeCell(c, None, note="not probeable") for c in cats]
             continue
         node = model.resolve(ref).node
         assert node is not None
@@ -648,7 +696,16 @@ def authority_probe(
             cell = ProbeCell(c, step.ok, step.add_cause, None if step.ok else step.ied_error, note)
             row.cells.append(cell)
             if step.ok:
-                ctl.cancel()
+                cancelled = ctl.cancel()
+                if not cancelled.ok:
+                    # The object stays selected until its sboTimeout: every later select would be refused with
+                    # object-already-selected, which says nothing about authority. Stop probing this object.
+                    why = step_error(cancelled)
+                    cell.note = "; ".join(x for x in (cell.note, f"cancel refused ({why})") if x)
+                    row.note = (f"probing stopped after orCat {c}: the cancel was refused ({why}), so the object stays "
+                                "selected until its sboTimeout")
+                    row.cells.extend(ProbeCell(rest, None, note="not probed (cancel refused)") for rest in cats[cats.index(c) + 1 :])
+                    break
             time.sleep(0.05)
     session.log.write("control", action="authority-probe", rows=[r.to_json() for r in rows])
     return rows

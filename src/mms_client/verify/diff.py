@@ -17,13 +17,16 @@ from __future__ import annotations
 import fnmatch
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
 from mms_client.core.results import Status, worst
 
-from .snapshot import Snapshot
+from .snapshot import Snapshot, model_structure
+
+if TYPE_CHECKING:
+    from mms_client.core.model import DeviceModel
 
 LAYER_SEVERITY: dict[str, Status] = {
     "structure": Status.FAIL,
@@ -168,3 +171,13 @@ def diff_snapshots(
             "(changes in access rights appear as value changes to/from an error)"
         )
     return res
+
+
+def model_differences(reference: Snapshot, model: DeviceModel, *, ignore: IgnoreRules | None = None) -> list[DiffEntry]:
+    """Differences between the model tree of a snapshot and a browsed model (no device reads). Used by
+    ``diagnose`` when the reference is a snapshot (DIA-1); ``check`` compares the full snapshot."""
+    ref = Snapshot(structure={
+        "model": reference.structure.get("model", {}),
+        "logical_nodes": reference.structure.get("logical_nodes", []),
+    })
+    return diff_snapshots(ref, model_structure(model), ignore=ignore, left_label="snapshot", right_label="live").entries

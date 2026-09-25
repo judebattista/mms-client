@@ -15,12 +15,13 @@ from typing import Any
 
 from mms_client import codes
 from mms_client.adapter import AccessError, ServiceError
-from mms_client.core.identity import Confidence, Edition, ask_edition, collect_identity
+from mms_client.core.identity import Confidence, Edition, ask_edition, identify
 from mms_client.core.model import DeviceModel, dataset_ref_to_mms
 from mms_client.core.refs import RefError, parse_mms
 from mms_client.core.reports import list_rcbs
 from mms_client.core.results import Category, CheckReport, CheckResult, RawExchange, Status
 from mms_client.core.session import Session
+from mms_client.inventory_ops import offer_to_save_edition
 
 from .diff import IgnoreRules, diff_snapshots
 from .snapshot import Snapshot, capture
@@ -46,21 +47,15 @@ def _r(check_id: str, title: str, status: Status, category: Category, **kw: Any)
 def edition_for_check(session: Session, needed_for: str) -> Edition:
     """The device's edition for an edition-dependent check; asks the operator only if needed
     and only interactively (IDN-4, IDN-5)."""
-    ident = session.identity
-    if ident is None:
-        ident = collect_identity(
-            session.require_client(),
-            session.model(),
-            override=getattr(session.target.device, "identity", None),
-            scl_edition=getattr(session.reference, "scl_edition", lambda: None)(),
-        )
-        session.identity = ident
+    ident = session.identity or identify(session, log=False)
     ed = ident.edition_value
     if ed is Edition.UNKNOWN:
         attr = ask_edition(session.ui, session.device_name, needed_for)
         if attr.confidence is Confidence.OPERATOR:
+            session.operator_edition = attr  # kept when the identity is read again (IDN-6)
             ident.edition = attr
             ident.edition_evidence.append(f"operator answered {attr.value.value}")
+            offer_to_save_edition(session, attr)
         ed = ident.edition_value
     return ed
 
@@ -303,9 +298,11 @@ def run_checks(session: Session, reference: Any = None, opts: CheckOptions | Non
         for r in reference.checks(session, opts):
             rep.add(r)
     else:
-        rep.add(_r("reference", "Reference comparison", Status.NOT_RUN, CONF,
-                   reason="no reference (SCD, CID, snapshot or device-supplied SCL) given: only self-consistency checks ran; "
-                   "review the raw values yourself"))
+        reason = ("no reference (SCD, CID, snapshot or device-supplied SCL) given: only self-consistency checks ran; "
+                  "review the raw values yourself")
+        if not session.ui.interactive:
+            reason += " (a non-interactive run does not look for SCL files on the device: use --device-scl)"
+        rep.add(_r("reference", "Reference comparison", Status.NOT_RUN, CONF, reason=reason))
     rep.finished_at = time.time()
     session.log.write("check", reference=rep.reference, summary=rep.summary(), duration_s=rep.finished_at - t0,
                       results=[r.to_json() for r in rep.results])

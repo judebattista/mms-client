@@ -36,7 +36,7 @@ from mms_client.adapter import (
     pyiec61850_version,
     value_to_json,
 )
-from mms_client.core.identity import collect_identity
+from mms_client.core.identity import identify
 from mms_client.core.model import ControlBlockInfo, DeviceModel
 from mms_client.core.refs import ObjectRef
 from mms_client.core.session import Session, owner_ip
@@ -196,8 +196,7 @@ def capture(
     # -- control blocks
     for cb in model.control_blocks({"URCB", "BRCB", "LCB", "SGCB"}):
         _capture_cb(reader, cb, snap, active_groups)
-    ident = collect_identity(reader.client, model, override=getattr(session.target.device, "identity", None))
-    session.identity = ident
+    ident = identify(session, log=False)
     for s in ident.sources:
         if s.source == "mms-identify":
             for k, v in s.fields.items():
@@ -232,6 +231,15 @@ def capture(
         unreadable=unreadable,
         duration_s=snap.metadata["duration_s"],
     )
+    return snap
+
+
+def model_structure(model: DeviceModel) -> Snapshot:
+    """The part of the structure layer that the browsed model alone gives, without reading anything: the
+    LD/LN/DO/DA tree with types and FCs (datasets and control blocks need reads and are left empty)."""
+    snap = Snapshot()
+    snap.structure = {"model": {}, "logical_nodes": [], "datasets": {}, "control_blocks": {}}
+    _structure_model(model, snap)
     return snap
 
 

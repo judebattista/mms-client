@@ -106,6 +106,23 @@ entries:
   hint: "ctlModel is status-only: this object cannot be controlled over MMS"
   certainty: fact
 
+- id: tool.ctlmodel-unusable
+  keys: [tool:ctlmodel-unusable]
+  title: ctlModel missing or not an integer
+  summary: >-
+    The object has an Oper structure but its ctlModel is missing from the device's model, or reads
+    as something other than an integer. The tool chooses the control sequence from ctlModel, so it
+    sent nothing.
+  details: |
+    If reading ctlModel fails on the device, the tool shows the device's own error code instead of
+    this one. This code means the device answered, but with nothing the tool can use.
+  next_checks:
+    - "`describe <object>` to see which attributes and FCs the device exposes"
+    - "Compare with the SCD/CID: ctlModel is a CF attribute of every controllable data object"
+  related: [control.ctlmodel, fc.cf]
+  hint: "ctlModel is missing or not an integer: the control sequence cannot be chosen, nothing was sent"
+  certainty: fact
+
 - id: tool.not-probeable-direct-control
   keys: [tool:not-probeable-direct-control]
   title: Direct-control object not probeable

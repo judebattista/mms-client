@@ -243,3 +243,153 @@ def test_diff_ignore_rules(tmp_path):
 def test_codes_parse():
     assert codes.parse_key("add-cause:10").name == "blocked-by-interlocking"
     assert codes.parse_key("data-access:object-access-denied").code == 3
+
+
+# ------------------------------------------------------------------------- RPT-7: BRCB reservation (Version-1.01)
+class _FakeRcbClient:
+    """Just enough of IedClient for the BRCB reservation cleanup."""
+
+    is_connected = True
+    local_ip = "10.0.0.9"
+
+    def __init__(self, *, refuse_release: bool = False, keeps_reservation: bool = False) -> None:
+        self.refuse_release = refuse_release
+        self.keeps_reservation = keeps_reservation
+        self.resv_tms = 30
+        self.writes: list[dict] = []
+
+    def get_rcb(self, ref):
+        from mms_client.adapter import RcbValues
+
+        owner = bytes([10, 0, 0, 9]) if self.resv_tms else b""
+        return RcbValues(ref, True, rpt_ena=False, resv_tms=self.resv_tms, owner=owner)
+
+    def set_rcb(self, ref, changes, single_request=True):
+        from mms_client.adapter import ServiceError
+
+        self.writes.append(dict(changes))
+        if self.refuse_release:
+            raise ServiceError("set-rcb", ref, codes.ied_error(21))
+        if not self.keeps_reservation:
+            self.resv_tms = changes.get("resv_tms", self.resv_tms)
+
+
+def _brcb_session(client, *, before_resv_tms=0):
+    from mms_client.adapter import RcbValues
+    from mms_client.core.model import ControlBlockInfo
+    from mms_client.core.reports import _brcb_reservation_cleanup
+    from mms_client.core.session import Session, Target
+
+    s = Session(Target("10.0.0.12"))
+    s.client = client  # type: ignore[assignment]
+    cb = ControlBlockInfo("CTRL", "LLN0", "brcbA01", "BR", VarSpec(MmsKind.STRUCTURE))
+    before = RcbValues(cb.reference, True, rpt_ena=False, resv_tms=before_resv_tms, owner=b"")
+    s.register_cleanup(_brcb_reservation_cleanup(s, cb, before, ["station-manager-1"]))
+    return s
+
+
+def test_brcb_reservation_is_released_and_nothing_lingers():
+    client = _FakeRcbClient()
+    notes = _brcb_session(client).run_cleanups()
+    assert client.writes == [{"resv_tms": 0}]
+    assert notes == ["undone: reservation of CTRL/LLN0.BR.brcbA01 (ResvTms back to 0)"]
+
+
+def test_brcb_reservation_that_lingers_is_reported_with_effect_and_duration():
+    notes = _brcb_session(_FakeRcbClient(keeps_reservation=True)).run_cleanups()
+    lingering = [n for n in notes if n.startswith("still in effect:")]
+    assert len(lingering) == 1
+    assert "up to 30 s" in lingering[0] and "station-manager-1 cannot enable it" in lingering[0]
+
+
+def test_brcb_reservation_refused_release_is_reported():
+    notes = _brcb_session(_FakeRcbClient(refuse_release=True)).run_cleanups()
+    assert len(notes) == 1 and notes[0].startswith("could not undo: reservation of CTRL/LLN0.BR.brcbA01")
+    assert "station-manager-1 cannot enable it" in notes[0]
+
+
+def test_brcb_reserved_by_configuration_is_not_released():
+    client = _FakeRcbClient()
+    notes = _brcb_session(client, before_resv_tms=-1).run_cleanups()
+    assert client.writes == []  # a reservation made by configuration is not the tool's to release
+    assert notes[0].startswith("left the reservation of CTRL/LLN0.BR.brcbA01 as the tool found it")
+
+
+def test_brcb_reservation_held_by_another_client_is_left_alone():
+    client = _FakeRcbClient()
+    client.get_rcb = lambda ref: __import__("mms_client.adapter", fromlist=["RcbValues"]).RcbValues(  # type: ignore[method-assign]
+        ref, True, rpt_ena=False, resv_tms=30, owner=bytes([10, 0, 0, 5]))
+    notes = _brcb_session(client).run_cleanups()
+    assert client.writes == []
+    assert notes == ["left the reservation of CTRL/LLN0.BR.brcbA01 alone: it is held by 10.0.0.5, not by this tool"]
+
+
+# ------------------------------------------------------------------------- LOG-2: restore markers (Version-1.01)
+def test_restored_seqs_counts_only_successful_restores_of_the_source_session():
+    from mms_client.core.sessionlog import restored_seqs
+
+    entries = [
+        {"seq": 1, "kind": "write", "ok": True, "ref": "LD/LN.A.b", "fc": "SP", "before": 1},
+        # a restore's own write: accepted, but only the restore entry says whether the value was put back
+        {"seq": 2, "kind": "write", "ok": True, "restored_from": 1, "restored_from_session": "S1"},
+        {"seq": 3, "kind": "restore", "ok": False, "restored_from": 1, "restored_from_session": "S1"},
+    ]
+    assert restored_seqs(entries, "S1", same_log=True) == set()
+    entries.append({"seq": 4, "kind": "restore", "ok": True, "restored_from": 1, "restored_from_session": "S1"})
+    assert restored_seqs(entries, "S1", same_log=True) == {1}
+    assert restored_seqs(entries, "OTHER", same_log=True) == set()
+
+
+def test_restored_seqs_reads_pre_1_01_markers_only_in_their_own_log():
+    from mms_client.core.sessionlog import restored_seqs
+
+    legacy = [{"seq": 9, "kind": "write", "ok": True, "restored_from": 4, "before": 2, "after": 1}]
+    assert restored_seqs(legacy, "S1", same_log=True) == {4}
+    assert restored_seqs(legacy, "S1", same_log=False) == set()
+
+
+def test_restorable_writes_skips_restore_writes_and_already_restored():
+    entries = [
+        {"seq": 1, "kind": "write", "ok": True, "ref": "LD/LN.A.b", "fc": "SP", "before": 1, "after": 2},
+        {"seq": 2, "kind": "write", "ok": True, "ref": "LD/LN.A.b", "fc": "SP", "before": 2, "after": 3},
+        {"seq": 3, "kind": "write", "ok": True, "ref": "LD/LN.A.b", "fc": "SP", "before": 3, "after": 2,
+         "restored_from": 2, "restored_from_session": "S1"},
+    ]
+    assert [w.seq for w in restorable_writes(entries)] == [2, 1]
+    assert [w.seq for w in restorable_writes(entries, already_restored={2})] == [1]
+
+
+# ------------------------------------------------------------------------- IDN-2/3/6: edition sources (Version-1.01)
+def test_scl_edition_is_confirmed_only_when_the_file_states_it_for_the_ied(tmp_path):
+    from pathlib import Path
+
+    from mms_client.core.identity import Confidence, IdentityReport, determine_edition
+    from mms_client.verify.reference import Reference
+
+    scl = Path(__file__).resolve().parents[1] / "fixtures" / "scl"
+    # one IED in the file (CID): the file states that IED's edition
+    assert Reference.load("cid", scl / "bcu_ed2.cid").scl_edition().confirmed
+    # several IEDs, each with its own originalSclVersion
+    own = Reference.load("scd", scl / "rack_mixed.scd", "IED3").scl_edition()
+    assert own is not None and own.edition == "Ed1" and own.confirmed
+    # several IEDs, and IED3 does not declare its own version: only the SCD's schema version is known
+    text = (scl / "rack_mixed.scd").read_text(encoding="utf-8").replace(' originalSclVersion="2003"', "")
+    (tmp_path / "rack.scd").write_text(text, encoding="utf-8")
+    ed = Reference.load("scd", tmp_path / "rack.scd", "IED3").scl_edition()
+    assert ed is not None and not ed.confirmed and "does not state IED3's own edition" in ed.reason
+    rep = IdentityReport()
+    determine_edition(rep, None, scl_edition=ed)
+    assert rep.edition.confidence is Confidence.INFERRED  # IDN-3: never shown as confirmed
+
+
+def test_operator_edition_is_the_last_resort_and_survives_a_new_identity():
+    from mms_client.core.identity import Attr, Confidence, IdentityReport, determine_edition
+
+    answer = Attr(Edition.ED1, "operator", Confidence.OPERATOR)
+    rep = IdentityReport()
+    determine_edition(rep, None, operator_edition=answer)
+    assert rep.edition == answer
+    # a device-reported namespace still takes precedence over the answer (IDN-2 order)
+    rep = IdentityReport(ld_namespaces={"LD": "IEC 61850-7-4:2007B"})
+    determine_edition(rep, None, operator_edition=answer)
+    assert rep.edition.value is Edition.ED21 and rep.edition.confidence is Confidence.INFERRED

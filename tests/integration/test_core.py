@@ -6,7 +6,8 @@ import time
 
 import pytest
 
-from mms_client.adapter import BitString
+from mms_client import codes
+from mms_client.adapter import BitString, ServiceError
 from mms_client.core import controls, files, readwrite, reports, restore, setgroup
 from mms_client.core.identity import Confidence, Edition, collect_identity
 from mms_client.core.safety import ConfirmationDeclined, Mode, Policy, PolicyError, SafetyProfile, Scripted
@@ -130,6 +131,56 @@ def test_status_only_refused_and_select_cancel(sim):
         s.close()
 
 
+@pytest.mark.parametrize("obj", ["SPCSO2", "SPCSO4"])
+def test_operate_uses_the_earlier_select(sim, obj):
+    """CTL-5 (Version-1.01): `select` then `operate` operates on that selection instead of selecting again."""
+    ref = f"{LD}/GGIO1.{obj}"
+    s = make_session(sim, [f"GGIO1.{obj}"] * 3)
+    try:
+        assert controls.select_only(s, controls.plan_control(s, ref, "true", or_cat=2)).ok
+        plan = controls.plan_control(s, ref, "true", or_cat=2)
+        assert plan.prior_select_age_s is not None and "selection:" in plan.summary()
+        out = controls.execute(s, plan)
+        assert out.ok and out.used_earlier_select, out.to_json()
+        assert [st.service for st in out.steps] == ["operate"]
+        if plan.ctl_model == 4:
+            assert out.termination is not None and out.termination.positive
+        assert ref not in s.selected
+        # the selection is consumed: the next operate runs the full sequence again
+        again = controls.execute(s, controls.plan_control(s, ref, "false", or_cat=2))
+        assert again.ok and not again.used_earlier_select and again.steps[0].service.startswith("select")
+    finally:
+        s.close()
+
+
+def test_sbow_select_with_another_value_is_warned(sim):
+    ref = f"{LD}/GGIO1.SPCSO4"
+    s = make_session(sim, ["GGIO1.SPCSO4"])
+    try:
+        assert controls.select_only(s, controls.plan_control(s, ref, "true", or_cat=2)).ok
+        plan = controls.plan_control(s, ref, "false", or_cat=2)
+        assert any("selection was made with ctlVal" in w for w in plan.warnings)
+    finally:
+        s.close()
+
+
+def test_empty_sbo_answer_is_not_reported_as_a_device_add_cause(sim):
+    """CLI-7 / EXP-4 (Version-1.01): an empty SBO read carries no AddCause; the tool must not invent one."""
+    ref = f"{LD}/GGIO1.SPCSO2"
+    holder = make_session(sim, ["GGIO1.SPCSO2"])
+    s = make_session(sim, ["GGIO1.SPCSO2"])
+    try:
+        assert controls.select_only(holder, controls.plan_control(holder, ref, "true", or_cat=2)).ok
+        out = controls.execute(s, controls.plan_control(s, ref, "true", or_cat=2))
+        assert not out.ok and out.error is not None
+        assert out.error.domain is not codes.Domain.ADD_CAUSE, out.error
+        assert out.error.key == "tool:control-refused"
+    finally:
+        controls.cancel(holder, ref)
+        holder.close()
+        s.close()
+
+
 def test_authority_probe_matrix(sim):
     s = make_session(sim, ["authority-probe"])
     try:
@@ -147,6 +198,54 @@ def test_authority_probe_matrix(sim):
         # nothing was operated
         assert readwrite.read(s, f"{LD}/GGIO2.SPCSO1.stVal").value is False
     finally:
+        s.close()
+
+
+def test_authority_probe_stops_when_cancel_is_refused(sim, monkeypatch):
+    """ORG-5 (Version-1.01): a refused Cancel leaves the object selected; later orCats are not probed."""
+    from mms_client.adapter import ControlStepResult
+    from mms_client.adapter.client import ControlObject
+
+    real_cancel = ControlObject.cancel
+
+    def refused(self):  # the device refuses the cancel and the object stays selected
+        return ControlStepResult(service="cancel", ok=False, duration_s=0.0, ied_error=codes.ied_error(21),
+                                 add_cause=None, ctl_error=None, ctl_num=0)
+
+    s = make_session(sim, ["authority-probe"])
+    try:
+        monkeypatch.setattr(ControlObject, "cancel", refused)
+        [row] = controls.authority_probe(s, f"{LD}/GGIO1.SPCSO4")
+        monkeypatch.setattr(ControlObject, "cancel", real_cancel)
+        by_cat = {c.or_cat: c for c in row.cells}
+        assert by_cat[1].accepted is True and "cancel refused" in by_cat[1].note
+        assert by_cat[2].accepted is None and by_cat[3].accepted is None  # not reported as authority refusals
+        assert "probing stopped after orCat 1" in row.note
+    finally:
+        monkeypatch.setattr(ControlObject, "cancel", real_cancel)
+        s.close()  # releasing the association deselects the object
+
+
+def test_unreadable_ctl_model_reports_the_devices_error(sim, monkeypatch):
+    """CLI-7 (Version-1.01): the device's own error, not an invented object-does-not-exist."""
+    from mms_client.adapter import AccessError
+    from mms_client.adapter.client import IedClient
+
+    real_read = IedClient.read
+
+    def read(self, domain, item, spec=None):
+        if item.endswith("$CF$SPCSO1$ctlModel"):
+            return AccessError(codes.data_access_error(3))
+        return real_read(self, domain, item, spec)
+
+    s = make_session(sim)
+    try:
+        monkeypatch.setattr(IedClient, "read", read)
+        with pytest.raises(ServiceError) as ei:
+            controls.plan_control(s, f"{LD}/GGIO1.SPCSO1", "true", or_cat=1)
+        assert ei.value.error == codes.data_access_error(3)
+    finally:
+        monkeypatch.setattr(IedClient, "read", real_read)
         s.close()
 
 
@@ -223,6 +322,27 @@ def test_cleanup_on_disconnect(sim):
         check.close()
 
 
+def test_brcb_reservation_released_on_stop(sim):
+    """RPT-7 (Version-1.01): enabling a BRCB reserves it (ResvTms); stop must release the reservation."""
+    ref = f"{LD}/LLN0.BR.brcbMeas01"
+    s = make_session(sim)
+    try:
+        assert s.client.get_rcb(ref).resv_tms == 0
+        sub = reports.subscribe(s, "brcbMeas01", gi=False)
+        assert s.client.get_rcb(ref).resv_tms not in (None, 0)  # the device reserved it for us
+        notes = sub.stop()
+        assert any(n.startswith("undone: reservation of") for n in notes), notes
+        assert not any(n.startswith("still in effect") for n in notes), notes
+    finally:
+        s.close()
+    other = make_session(sim)
+    try:
+        st = next(x for x in reports.list_rcbs(other) if x.cb.reference == ref)
+        assert st.state == "free" and reports.free_reason(st, me=None) is None
+    finally:
+        other.close()
+
+
 def test_cleanup_reported_when_connection_lost():
     from tests.conftest import FIXTURES
     from tests.sim.fixture import SimProcess
@@ -259,6 +379,18 @@ def test_setgroup_edit_and_activate(sim, tmp_path):
         s.close()
 
 
+def test_declined_setgroup_edit_releases_the_edit_session(sim):
+    """RW-7 (Version-1.01): a declined edit must not leave the SGCB in edit mode until the session ends."""
+    s = make_session(sim, [False])
+    try:
+        with pytest.raises(ConfirmationDeclined):
+            setgroup.edit(s, 2, [(f"{LD}/GGIO1.OpDlTmms.setVal", "250")])
+        assert setgroup.show(s)[0].values["EditSG"] == 0
+        assert not any(a.key.startswith("sgcb:") for a in s.cleanups)
+    finally:
+        s.close()
+
+
 def test_write_restore_roundtrip(sim, tmp_path):
     s = make_session(sim, [True, True, True], tmp_path=tmp_path)
     try:
@@ -271,6 +403,48 @@ def test_write_restore_roundtrip(sim, tmp_path):
         assert s.log.path is not None and s.log.path.exists()
     finally:
         s.close()
+
+
+def test_restore_twice_changes_nothing(sim, tmp_path):
+    """LOG-2 (Version-1.01): a second restore must not re-apply the values the first one undid."""
+    ref = f"{LD}/GGIO1.Setp1.setVal"
+    s = make_session(sim, [True] * 6, tmp_path=tmp_path)
+    try:
+        start = readwrite.read(s, ref).value
+        readwrite.write(s, ref, str(start + 1))
+        restore.run_restore(s, restore.plan_restore(s))
+        assert readwrite.read(s, ref).value == start
+        again = restore.plan_restore(s)
+        assert again.items == [] and again.already_restored == 1
+        # a new write after the restore is restorable, and only that one
+        readwrite.write(s, ref, str(start + 2))
+        plan = restore.plan_restore(s)
+        assert [i.write.before for i in plan.items] == [start]
+        restore.run_restore(s, plan)
+        assert readwrite.read(s, ref).value == start
+    finally:
+        s.close()
+
+
+def test_restore_of_an_earlier_log_twice_changes_nothing(sim, tmp_path):
+    ref = f"{LD}/GGIO1.Setp1.setVal"
+    a = make_session(sim, [True], tmp_path=tmp_path)
+    try:
+        a.log.start()
+        start = readwrite.read(a, ref).value
+        readwrite.write(a, ref, str(start + 5))
+    finally:
+        a.close()
+    b = make_session(sim, [True, True], tmp_path=tmp_path)
+    try:
+        first = restore.plan_restore(b, a.log.path)
+        assert len(first.items) == 1
+        restore.run_restore(b, first)
+        assert readwrite.read(b, ref).value == start
+        second = restore.plan_restore(b, a.log.path)
+        assert second.items == [] and second.already_restored == 1
+    finally:
+        b.close()
 
 
 def test_files(sim, tmp_path):

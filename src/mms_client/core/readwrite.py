@@ -230,9 +230,11 @@ def write(
     fc: str | None = None,
     verify: bool = True,
     confirm: bool = True,
+    log_extra: dict[str, Any] | None = None,
 ) -> WriteResult:
     """Write one basic attribute (RW-3 … RW-6): type from the device's model, show current and
-    new value, confirm, write, read back."""
+    new value, confirm, write, read back. ``log_extra`` is added to the log entry (restore marks its
+    own writes with ``restored_from`` so that they are never restored in turn, LOG-2)."""
     client = session.require_client()
     model = session.model()
     ref = text if isinstance(text, ObjectRef) else parse_ref(text, session.cwd, fc, model.ld_names)
@@ -289,6 +291,7 @@ def write(
         error=res.error,
         mode=session.mode.value,
         warnings=warnings,
+        **(log_extra or {}),
     )
     return res
 
@@ -303,11 +306,13 @@ def values_equal(a: Value, b: Value) -> bool:
     return value_to_json(a) == value_to_json(b)
 
 
-def restore_value(session: Session, ref_text: str, fc: str, before_json: Any) -> WriteResult:
+def restore_value(
+    session: Session, ref_text: str, fc: str, before_json: Any, *, log_extra: dict[str, Any] | None = None
+) -> WriteResult:
     """Write a previously logged value back (LOG-2); confirmation is handled by the caller."""
     model = session.model()
     ref = parse_ref(ref_text, (), fc, model.ld_names)
-    return write(session, ref, value=value_from_json(before_json), confirm=False)
+    return write(session, ref, value=value_from_json(before_json), confirm=False, log_extra=log_extra)
 
 
 # ---------------------------------------------------------------------------------- watch

@@ -111,12 +111,14 @@ def assignments(session: Session, cb: ControlBlockInfo) -> list[str]:
     if session.inventory is not None:
         for rel in session.inventory.clients_of(session.target.name or ""):
             for r in rel.rcbs:
-                if _same_rcb(r, cb):
+                if same_rcb(r, cb):
                     out.append(rel.client)
     return sorted(set(out))
 
 
-def _same_rcb(text: str, cb: ControlBlockInfo) -> bool:
+def same_rcb(text: str, cb: ControlBlockInfo) -> bool:
+    """Does an RCB name from the inventory or the command line (``LD/LLN0.BR.brcbA01``, ``LD/LLN0$BR$brcbA01``
+    or the IEC form without FC, ``LD/LLN0.brcbA01``) name this control block?"""
     t = text.replace("$", ".")
     return t in (cb.reference, f"{cb.ld}/{cb.ln}.{cb.name}") or t.endswith(f"/{cb.ln}.{cb.fc}.{cb.name}")
 
@@ -307,8 +309,10 @@ class Subscription:
                 notes.append(f"could not undo: {action.description} — {action.if_lost}")
                 continue
             try:
-                action.undo()
-                notes.append(f"undone: {action.description}")
+                notes.append(action.undo() or f"undone: {action.description}")
+                lingering = action.check_after_undo()
+                if lingering:
+                    notes.append(f"still in effect: {lingering}")
             except ServiceError as e:
                 notes.append(f"could not undo: {action.description} ({e.error}) — {action.if_lost}")
         if self.session.client is not None:
@@ -442,6 +446,13 @@ def subscribe(
             )
         )
         _set(session, ref, {"resv": True})
+    # 1b. reservation (BRCB with ResvTms, Ed2): enabling a BRCB reserves it for this client's address, and the
+    # reservation outlives the association by ResvTms seconds. Registered before anything is written so that it
+    # is undone last, after RptEna (RPT-7).
+    resv_action = None
+    if cb.kind == "BRCB" and values.resv_tms is not None:
+        resv_action = _brcb_reservation_cleanup(session, cb, values, chosen.assigned_to)
+        session.register_cleanup(resv_action)
     # 2. parameters (RPT-8: logged like any write)
     changes: dict[str, Any] = {}
     originals: dict[str, Any] = {}
@@ -473,9 +484,7 @@ def subscribe(
     if_lost = (
         "the device disables a URCB when the association ends"
         if cb.kind == "URCB"
-        else "a BRCB stays reserved for this client for ResvTms seconds"
-        + (f" (currently {values.resv_tms} s)" if values.resv_tms else "")
-        + " and keeps buffering; reconnect from the same address to release it"
+        else "the device stops sending reports when the association ends but keeps buffering events for this BRCB"
     )
     session.register_cleanup(
         CleanupAction(f"rcb:{ref}:enable", f"RptEna of {ref}", lambda: client.set_rcb(ref, {"rpt_ena": False}), if_lost)
@@ -489,14 +498,64 @@ def subscribe(
         raise
     sub.active = True
     session.subscriptions[ref] = sub
-    if gi:
-        after = client.get_rcb(ref)
-        if after.trg_ops is not None and after.trg_ops & 16:
-            try:
-                sub.gi()
-            except ServiceError as e:
-                session.remember_error(e.error, {"service": "gi"}, str(e))
+    after = client.get_rcb(ref) if (gi or resv_action is not None) else None
+    if resv_action is not None and after is not None and after.resv_tms not in (None, 0):
+        # the device's ResvTms is only known now that it has reserved the BRCB for us
+        resv_action.if_lost = _lingering_text(ref, after.resv_tms, chosen.assigned_to)
+    if gi and after is not None and after.trg_ops is not None and after.trg_ops & 16:
+        try:
+            sub.gi()
+        except ServiceError as e:
+            session.remember_error(e.error, {"service": "gi"}, str(e))
     return sub
+
+
+def _lingering_text(ref: str, resv_tms: int | None, assigned: list[str]) -> str:
+    who = ", ".join(assigned) if assigned else "other clients"
+    secs = f"{resv_tms} s" if resv_tms not in (None, 0) else "ResvTms seconds"
+    return (
+        f"{ref} stays reserved for this tool's address for up to {secs} after the association ends; "
+        f"{who} cannot enable it until then (reconnect from the same address to release it sooner)"
+    )
+
+
+def _brcb_reservation_cleanup(session: Session, cb: ControlBlockInfo, values: RcbValues, assigned: list[str]) -> CleanupAction:
+    """RPT-7 for a BRCB with ResvTms: release the reservation the tool caused, and report what lingers.
+
+    The tool releases (ResvTms := 0) only a reservation that is held for its own address when the cleanup runs.
+    After a takeover that is the tool's reservation too: the previous holder's cannot be given back, and
+    releasing it lets that client enable the RCB again at once. A reservation made by configuration (ResvTms -1)
+    is never touched. Afterwards the BRCB is read again: a reservation that is still held for this tool's address
+    is reported with its effect and duration.
+    """
+    ref = cb.reference
+    by_configuration = values.resv_tms == -1
+
+    def undo() -> str | None:
+        if by_configuration:
+            return f"left the reservation of {ref} as the tool found it (ResvTms=-1: reserved by configuration)"
+        client = session.require_client()
+        v = client.get_rcb(ref)
+        if v.resv_tms not in (None, 0) and not session.is_own_owner(v.owner):
+            holder = session.owner_name(v.owner) or owner_ip(v.owner) or "another client"
+            return f"left the reservation of {ref} alone: it is held by {holder}, not by this tool"
+        if v.resv_tms not in (None, 0):
+            client.set_rcb(ref, {"resv_tms": 0})
+        return None
+
+    def verify() -> str | None:
+        v = session.require_client().get_rcb(ref)
+        if v.resv_tms in (None, 0) or not session.is_own_owner(v.owner):
+            return None
+        return _lingering_text(ref, v.resv_tms, assigned)
+
+    return CleanupAction(
+        f"rcb:{ref}:resv",
+        f"reservation of {ref}" if by_configuration else f"reservation of {ref} (ResvTms back to 0)",
+        undo,
+        _lingering_text(ref, None, assigned),
+        verify=verify,
+    )
 
 
 def _pick_for_takeover(statuses: list[RcbStatus]) -> RcbStatus:

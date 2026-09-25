@@ -154,3 +154,29 @@ def write_back_identity(inv: Inventory, device_name: str, identity: Any, *, edit
     if edition and edition != "unknown":
         dev.identity.edition = edition
     return dev
+
+
+def offer_to_save_edition(session: Any, attr: Any) -> str | None:
+    """IDN-6: right after the operator has answered the edition question, offer to store the answer in the
+    experiment inventory, so that the experiment is asked only once. Returns the inventory path if saved.
+
+    Only offered interactively, with an inventory file that contains the device; declining changes nothing.
+    """
+    from mms_client.core.safety import ConfirmationDeclined
+
+    inv = session.inventory
+    dev = session.target.device
+    edition = getattr(attr.value, "value", attr.value)
+    if inv is None or inv.path is None or dev is None or not session.ui.interactive or dev.identity.edition == edition:
+        return None
+    try:
+        session.policy.confirm_write(
+            session.ui,
+            f"Save edition {edition} for {dev.name} in the inventory {inv.path}, so that this experiment does not ask again?",
+        )
+    except ConfirmationDeclined:
+        return None
+    write_back_identity(inv, dev.name, None, edition=edition)
+    inv.save()
+    session.log.write("note", action="save-identity", inventory=str(inv.path), device=dev.name, edition=edition)
+    return str(inv.path)

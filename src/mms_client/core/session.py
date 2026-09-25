@@ -9,6 +9,7 @@ same operations are available from Python without the CLI (ARC-1).
 from __future__ import annotations
 
 import signal
+import socket
 import threading
 import time
 from collections.abc import Callable
@@ -78,8 +79,18 @@ class CleanupAction:
 
     key: str
     description: str
-    undo: Callable[[], None]
+    undo: Callable[[], str | None]  # may return its own note instead of "undone: <description>"
     if_lost: str  # what lingers if the association is gone and we cannot undo
+    # After a successful undo: re-read the device and describe what is still in effect (None = nothing).
+    verify: Callable[[], str | None] | None = None
+
+    def check_after_undo(self) -> str | None:
+        if self.verify is None:
+            return None
+        try:
+            return self.verify()
+        except (ServiceError, NotConnectedError) as e:
+            return f"could not re-read the device to confirm that {self.description} was undone ({getattr(e, 'error', e)})"
 
 
 @dataclass
@@ -119,6 +130,7 @@ class Session:
         self.client: IedClient | None = None
         self._model: DeviceModel | None = None
         self.identity: Any = None  # core.identity.IdentityReport, filled lazily
+        self.operator_edition: Any = None  # core.identity.Attr: the operator's answer to the edition question (IDN-4)
         self.or_cat: int | None = None
         self.or_ident = or_ident or default_or_ident()
         self.cleanups: list[CleanupAction] = []
@@ -130,6 +142,7 @@ class Session:
         self.cwd: tuple[str, ...] = ()
         self.last_results: dict[str, Any] = {}  # "check" / "diagnose" -> latest report (LOG-3)
         self.buf_ovfl_seen: dict[str, tuple[bool, float]] = {}  # BRCB -> (BufOvfl, when) from reports
+        self._own_address: str | None = None
 
     # ------------------------------------------------------------------ properties
     @property
@@ -174,6 +187,7 @@ class Session:
             self.remember_error(e.error, {"service": "associate"}, str(e))
             raise
         self.client = client
+        self.selected.clear()  # selections belong to an association (CTL-5)
         self.connection_lost.clear()
         client.add_closed_listener(self.connection_lost.set)
         self.log.write(
@@ -216,6 +230,7 @@ class Session:
     def disconnect(self) -> list[str]:
         """Undo our changes (RPT-7), then release the association. Returns cleanup notes."""
         notes = self.run_cleanups()
+        self.selected.clear()  # the device deselects when the association ends
         if self.client is not None:
             self.client.close()
             self.log.write("request", service="release", target=self.device_name, ok=True)
@@ -272,9 +287,11 @@ class Session:
                 self.log.write("rcb", action="cleanup-skipped", key=action.key, reason="not connected", lingering=action.if_lost)
                 continue
             try:
-                action.undo()
-                notes.append(f"undone: {action.description}")
-                self.log.write("rcb", action="cleanup", key=action.key, ok=True)
+                notes.append(action.undo() or f"undone: {action.description}")
+                lingering = action.check_after_undo()
+                if lingering:
+                    notes.append(f"still in effect: {lingering}")
+                self.log.write("rcb", action="cleanup", key=action.key, ok=True, lingering=lingering)
             except (ServiceError, NotConnectedError) as e:
                 err = getattr(e, "error", None)
                 notes.append(f"could not undo: {action.description} ({err or e}) — {action.if_lost}")
@@ -299,6 +316,29 @@ class Session:
         self.or_cat = value
         self.log.write("note", setting="orcat", value=value, name=codes.OR_CATS.get(value))
 
+    def own_address(self) -> str | None:
+        """This tool's source address towards the device: the bound address (NBR-2), else the address the OS
+        routes from (found with a UDP connect, which sends nothing). Devices put it in RCB Owner."""
+        if self.target.local_ip:
+            return self.target.local_ip
+        if self.client is not None and self.client.local_ip:
+            return self.client.local_ip
+        if self._own_address is None:
+            try:
+                family, stype, proto, _, addr = socket.getaddrinfo(self.target.host, self.target.port, type=socket.SOCK_DGRAM)[0]
+                with socket.socket(family, stype, proto) as sock:
+                    sock.connect(addr)
+                    self._own_address = str(sock.getsockname()[0])
+            except OSError:
+                return None
+        return self._own_address
+
+    def is_own_owner(self, owner: bytes | None) -> bool:
+        """Is this RCB Owner this tool's own address? (Independent of inventory names: with ``--as`` the
+        tool's address is also the neighbour's.)"""
+        ip = owner_ip(owner)
+        return ip is not None and ip == self.own_address()
+
     def owner_name(self, owner: bytes | None) -> str | None:
         """Resolve an RCB Owner (usually the client's IP address) to an inventory name."""
         ip = owner_ip(owner)
@@ -308,7 +348,7 @@ class Session:
             name = self.inventory.name_for_ip(ip)
             if name:
                 return name
-        if self.target.local_ip == ip or (self.client is not None and self.client.local_ip == ip):
+        if ip == self.own_address():
             return "this tool"
         return None
 

@@ -144,3 +144,57 @@ def test_device_supplied_reference(tmp_path):
     info = by_id(rep, "device-supplied-reference")
     assert info and info[0].status is Status.INFO
     assert rep.reference["kind"] == "device-supplied"
+
+
+def test_operator_edition_is_offered_for_saving(bcu_sim, tmp_path):
+    """IDN-6 (Version-1.01): the operator's edition answer can be stored at once, so it is asked only once."""
+    from mms_client.core.identity import Attr, Confidence, Edition, IdentityReport, identify
+    from mms_client.inventory import load_inventory
+    from mms_client.verify.checks import edition_for_check
+
+    path = tmp_path / "rack.yaml"
+    path.write_text(f"schema_version: 1\ndevices:\n  - name: bcu1\n    ip: 127.0.0.1\n    port: {bcu_sim.port}\n")
+    inv = load_inventory(path)
+    s = Session(Target("127.0.0.1", bcu_sim.port, "bcu1", inv.devices[0]), inventory=inv, policy=Policy(),
+                ui=Scripted(["Ed1", True]))
+    try:
+        s.connect()
+        s.identity = IdentityReport(edition=Attr(Edition.UNKNOWN, "none", Confidence.UNKNOWN))
+        assert edition_for_check(s, "test") is Edition.ED1
+        assert s.operator_edition.value is Edition.ED1
+        assert "edition: Ed1" in path.read_text()
+        assert "Save edition Ed1" in s.ui.prompts[-1]
+        # reading the identity again keeps it (now from the inventory, operator-supplied)
+        rep = identify(s)
+        assert rep.edition.value is Edition.ED1 and rep.edition.confidence is Confidence.OPERATOR
+    finally:
+        s.close()
+
+
+def test_device_scl_is_offered_without_being_asked_for(tmp_path):
+    """VER-8 (Version-1.01): with no reference, an interactive check looks on the device and offers what it finds;
+    a non-interactive one does not touch the file service."""
+    import shutil
+
+    from mms_client.verify.reference import reference_for
+    from tests.sim.fixture import SimProcess
+
+    files = tmp_path / "files"
+    files.mkdir()
+    shutil.copy(SCL / "bcu_ed2.cid", files / "BCU1.cid")
+    with SimProcess(scl=SCL / "bcu_ed2.cid", ied="BCU1", options={"files": str(files)}) as p:
+        s = session(p, ui=Scripted(["BCU1.cid"]))
+        try:
+            ref = reference_for(s)
+            assert ref is not None and ref.kind == "device-supplied"
+            assert "BCU1.cid" in s.ui.options[0][0]
+        finally:
+            s.close()
+        s = session(p)  # NonInteractive
+        try:
+            assert reference_for(s) is None
+            assert not any(e.get("kind") == "file" for e in s.log.entries)
+            rep = run_checks(s, None)
+            assert "--device-scl" in by_id(rep, "reference")[0].reason
+        finally:
+            s.close()
