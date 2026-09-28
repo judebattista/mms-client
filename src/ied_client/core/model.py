@@ -1,11 +1,11 @@
 """The device model as the protocol module reports it (MDL-1, MDL-4).
 
 Browsing asks the association for the logical devices, their logical nodes and datasets, and for
-each logical node its type: the whole LN structure grouped by functional constraint. The model then
-merges the FC branches into an IEC view: LD → LN → DO → … → DA, where every node remembers under
-which FC(s) it exists.
+each logical node its contents (:class:`~ied_client.protocol.types.LogicalNodeModel`): the IEC view
+LD → LN → DO → … → DA, where every node remembers under which FC(s) it exists, and the LN's control
+blocks.
 
-A DO and a structured DA look the same in that type; only an SCL reference can tell them apart.
+A DO and a structured DA look the same in that view; only an SCL reference can tell them apart.
 """
 
 from __future__ import annotations
@@ -18,78 +18,42 @@ from typing import Any
 from ied_client.codes import ErrorInfo
 from ied_client.protocol.api import Association
 from ied_client.protocol.errors import ServiceError
-from ied_client.protocol.types import DatasetRef, ValueKind, VarSpec
+from ied_client.protocol.types import ControlBlockInfo, DataNode, DatasetRef, LogicalNodeModel, VarSpec
 
 from .refs import ObjectRef, RefError, ln_class_of
 
-# FC branches whose children are control blocks, not data objects.
-CONTROL_BLOCK_FCS = frozenset({"RP", "BR", "GO", "MS", "US", "LG"})
-# Components of the SP branch of LLN0 that are control blocks.
-SP_CONTROL_BLOCKS = frozenset({"SGCB"})
-
-
-@dataclass(slots=True)
-class DataNode:
-    """A DO/SDO/DA/BDA, merged over FCs. ``specs`` maps FC → the type at this node."""
-
-    name: str
-    specs: dict[str, VarSpec] = field(default_factory=dict)
-    children: dict[str, DataNode] = field(default_factory=dict)
-
-    @property
-    def fcs(self) -> list[str]:
-        return list(self.specs)
-
-    def is_leaf(self) -> bool:
-        return not self.children
-
-    def merge(self, fc: str, spec: VarSpec) -> None:
-        self.specs[fc] = spec
-        if spec.kind is ValueKind.STRUCTURE:
-            for c in spec.children:
-                if c.name is None:
-                    continue
-                node = self.children.get(c.name)
-                if node is None:
-                    node = self.children[c.name] = DataNode(c.name)
-                node.merge(fc, c)
-
-    def to_json(self) -> dict:
-        return {"name": self.name, "fcs": {fc: s.type_name() for fc, s in self.specs.items()}}
-
-
-@dataclass(slots=True)
-class ControlBlockInfo:
-    ld: str
-    ln: str
-    name: str
-    fc: str  # RP, BR, GO, MS, US, LG, SP (SGCB)
-    spec: VarSpec
-
-    @property
-    def reference(self) -> str:
-        """IEC-style reference with the FC, e.g. ``LD/LLN0.BR.brcb01`` (how the client names control blocks)."""
-        return f"{self.ld}/{self.ln}.{self.fc}.{self.name}"
-
-    @property
-    def kind(self) -> str:
-        return {"RP": "URCB", "BR": "BRCB", "GO": "GoCB", "MS": "MSVCB", "US": "USVCB", "LG": "LCB", "SP": "SGCB"}[
-            self.fc
-        ]
+__all__ = [
+    "AmbiguousFcError",
+    "ControlBlockInfo",
+    "DataNode",
+    "DeviceModel",
+    "LogicalDeviceInfo",
+    "LogicalNodeInfo",
+    "NotInModelError",
+    "Resolved",
+    "browse",
+]
 
 
 @dataclass(slots=True)
 class LogicalNodeInfo:
     ld: str
     name: str
-    spec: VarSpec | None = None
     data: dict[str, DataNode] = field(default_factory=dict)
     control_blocks: dict[str, ControlBlockInfo] = field(default_factory=dict)
     error: ErrorInfo | None = None
 
+    @classmethod
+    def from_model(cls, ld: str, name: str, model: LogicalNodeModel) -> LogicalNodeInfo:
+        return cls(ld, name, model.data, model.control_blocks)
+
     @property
     def ln_class(self) -> str:
         return ln_class_of(self.name)
+
+    @property
+    def fcs(self) -> list[str]:
+        return LogicalNodeModel(self.data, self.control_blocks).fcs
 
 
 @dataclass(slots=True)
@@ -125,8 +89,8 @@ class Resolved:
     def fcs(self) -> list[str]:
         if self.node is not None:
             return self.node.fcs
-        if self.ln is not None and self.ln.spec is not None:
-            return [c.name for c in self.ln.spec.children if c.name]
+        if self.ln is not None:
+            return self.ln.fcs
         return []
 
 
@@ -166,7 +130,7 @@ class DeviceModel:
         return Resolved(ref, "data", ld, ln, node)
 
     def resolve_fc(self, ref: ObjectRef, prefer: tuple[str, ...] = ()) -> tuple[ObjectRef, VarSpec]:
-        """Return ``ref`` with its FC fixed and the MMS type there. Ambiguity is an error unless
+        """Return ``ref`` with its FC fixed and the type there. Ambiguity is an error unless
         ``prefer`` names an FC present at the node."""
         r = self.resolve(ref)
         if r.kind != "data" or r.node is None:
@@ -244,15 +208,14 @@ class DeviceModel:
     def count_attributes(self) -> int:
         return sum(1 for _ in self.iter_leaves())
 
-    # ------------------------------------------------------------------ serialisation (snapshots, cache)
+    # ------------------------------------------------------------------ serialisation (cache)
     def to_json(self) -> dict:
+        """The model as JSON: per LN, each data object's type per FC and each control block."""
         return {
             "logical_devices": {
                 ld_name: {
                     "datasets": [{"ln": d.ln, "name": d.name} for d in ldi.datasets],
-                    "logical_nodes": {
-                        ln_name: {"spec": lni.spec.to_json() if lni.spec else None} for ln_name, lni in ldi.lns.items()
-                    },
+                    "logical_nodes": {ln_name: _ln_to_json(lni) for ln_name, lni in ldi.lns.items()},
                 }
                 for ld_name, ldi in self.lds.items()
             }
@@ -264,10 +227,30 @@ class DeviceModel:
         for ld_name, ldd in d.get("logical_devices", {}).items():
             ldi = LogicalDeviceInfo(ld_name, datasets=[DatasetRef(ld_name, d["ln"], d["name"]) for d in ldd.get("datasets", [])])
             for ln_name, lnd in ldd.get("logical_nodes", {}).items():
-                spec = VarSpec.from_json(lnd["spec"]) if lnd.get("spec") else None
-                ldi.lns[ln_name] = build_ln(ld_name, ln_name, spec)
+                ldi.lns[ln_name] = _ln_from_json(ld_name, ln_name, lnd)
             m.lds[ld_name] = ldi
         return m
+
+
+def _ln_to_json(lni: LogicalNodeInfo) -> dict:
+    return {
+        "data": {name: {fc: s.to_json() for fc, s in node.specs.items()} for name, node in lni.data.items()},
+        "control_blocks": {name: {"fc": cb.fc, "spec": cb.spec.to_json()} for name, cb in lni.control_blocks.items()},
+        "error": lni.error.to_json() if lni.error else None,
+    }
+
+
+def _ln_from_json(ld: str, ln: str, d: dict) -> LogicalNodeInfo:
+    lnm = LogicalNodeModel()
+    for fcs in d.get("data", {}).values():
+        for fc, spec in fcs.items():
+            lnm.add_data(fc, VarSpec.from_json(spec))
+    for name, cb in d.get("control_blocks", {}).items():
+        lnm.add_control_block(ControlBlockInfo(ld, ln, name, cb["fc"], VarSpec.from_json(cb["spec"])))
+    info = LogicalNodeInfo.from_model(ld, ln, lnm)
+    if d.get("error"):
+        info.error = ErrorInfo(**d["error"])
+    return info
 
 
 def _leaves(ref: ObjectRef, node: DataNode, fcs) -> Iterator[tuple[ObjectRef, VarSpec]]:
@@ -280,38 +263,14 @@ def _leaves(ref: ObjectRef, node: DataNode, fcs) -> Iterator[tuple[ObjectRef, Va
             yield ref.with_fc(fc), spec
 
 
-def build_ln(ld: str, ln: str, spec: VarSpec | None) -> LogicalNodeInfo:
-    info = LogicalNodeInfo(ld, ln, spec)
-    if spec is None:
-        return info
-    for fc_branch in spec.children:
-        fc = fc_branch.name or ""
-        if fc in CONTROL_BLOCK_FCS:
-            for cb in fc_branch.children:
-                if cb.name:
-                    info.control_blocks[cb.name] = ControlBlockInfo(ld, ln, cb.name, fc, cb)
-            continue
-        for do_spec in fc_branch.children:
-            if do_spec.name is None:
-                continue
-            if fc == "SP" and do_spec.name in SP_CONTROL_BLOCKS:
-                info.control_blocks[do_spec.name] = ControlBlockInfo(ld, ln, do_spec.name, "SP", do_spec)
-                continue
-            node = info.data.get(do_spec.name)
-            if node is None:
-                node = info.data[do_spec.name] = DataNode(do_spec.name)
-            node.merge(fc, do_spec)
-    return info
-
-
 def browse(
     client: Association,
     *,
     progress: Callable[[str, int, int], None] | None = None,
     lds: list[str] | None = None,
 ) -> DeviceModel:
-    """Read the device's model: logical devices, then each LD's logical nodes (one type request per LN)
-    and datasets.
+    """Read the device's model: logical devices, then each LD's logical nodes (one request per LN) and
+    datasets.
 
     Failures on individual LNs are recorded in ``model.errors`` and on the LN; browsing goes on.
     """
@@ -331,8 +290,7 @@ def browse(
             if progress:
                 progress(f"{ld_name}/{ln_name}", i + 1, len(ln_names))
             try:
-                spec = client.logical_node_spec(ld_name, ln_name)
-                ldi.lns[ln_name] = build_ln(ld_name, ln_name, spec)
+                ldi.lns[ln_name] = LogicalNodeInfo.from_model(ld_name, ln_name, client.logical_node(ld_name, ln_name))
             except ServiceError as e:
                 lni = LogicalNodeInfo(ld_name, ln_name, error=e.error)
                 ldi.lns[ln_name] = lni

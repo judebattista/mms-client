@@ -36,7 +36,7 @@ class MmsProtocol:
         "devices) cannot be observed by this tool."
     )
     # IEC 61850-8-1 maps a select without value to a read of SBO, which carries no originator (ORG-5).
-    sbo_normal_select_note = "SBO with normal security: the select carries no orCat"
+    select_carries_origin = False
     association_layers = ("network", "transport-session", "mms-initiate", "association")
 
     @property

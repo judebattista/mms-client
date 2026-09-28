@@ -7,9 +7,12 @@ client**: a test-rack tool that associates with an IEC 61850 device, browses its
 reads/writes/operates it, and verifies and diagnoses it — without saying *how* those things go
 over the wire. The wire protocol is supplied by a separate **protocol spec** that implements the
 contract in §4.1. Today there is one such document, [MMS-PROTOCOL-SPEC.md](MMS-PROTOCOL-SPEC.md),
-covering MMS via `pyiec61850-ng`/libiec61850. This document is written so that a second protocol
-spec (a different IEC 61850 SCSM, or a non-MMS protocol entirely) could be added later and plug
-into the same CLI, safety model, verification engine and explanation system.
+covering MMS via `pyiec61850-ng`/libiec61850. The tool is an **IEC 61850 client**: the core
+speaks the abstract services of IEC 61850-7-2 (ACSI), and a protocol module is a specific
+communication service mapping (SCSM) of those services — IEC 61850-8-1 (MMS) today; another MMS
+stack or IEC 61850-8-2 could be added later and plug into the same CLI, safety model,
+verification engine and explanation system. Protocols that do not carry the IEC 61850 data model
+(DNP3, Modbus, IEC 60870-5-104) are out of scope (§2.3).
 
 Requirements carry IDs (e.g. `CTL-4`) so that code, tests and reviews can refer back to them.
 Keywords **must**, **should** and **may** are used in their usual sense. IDs are unique across
@@ -63,14 +66,18 @@ any power grid, but the IEDs are real devices with real outputs.
 - Active probing of association/session limits and refusal behaviour (protocol-specific:
   `assoc-probe`, see MMS-PROTOCOL-SPEC.md). Planned for v2.
 - GUI or TUI front end.
-- A second protocol module. The contract in §4.1 is written with this in mind, but nothing beyond
-  MMS is planned or built.
+- A second protocol module (another IEC 61850 SCSM). The contract in §4.1 is written with this in
+  mind, but nothing beyond MMS is planned or built.
 
 ### 2.3 Out of scope
 - **Passive capture of traffic between other devices.** The tool is an active client. Diagnosing
   the link between two other devices directly requires packet capture (e.g. Wireshark), which is
   not part of this tool. What a given protocol module can and cannot observe at all (e.g. an MMS
   module cannot see GOOSE/SV) is documented in that protocol's spec, not here.
+- **Protocols other than IEC 61850.** The core is built on the IEC 61850 data model (LD/LN/DO/DA,
+  FCs, control model, RCBs, setting groups, SCL). A protocol module maps that model onto a wire
+  protocol; protocols without it (DNP3, Modbus, IEC 60870-5-104) would need a different tool,
+  which could reuse this one's CLI, safety, logging and explanation framework as a library.
 - **Access control.** Operating modes (§4) are guardrails against mistakes, not security.
 - **Communication security (v1).** No transport/association authentication or encryption in v1.
   Detection of an IED that appears to require it is in scope (§6.2); implementing it is not.
@@ -116,10 +123,10 @@ native names are opaque strings supplied by its `Naming` and shown alongside the
 | PROTO-1 | **Connect/associate**, given a host, port (module-defined default) and any module-specific connection parameters carried in the inventory (INV-6) or CLI flags (e.g. a bound source address, NBR-2); return association-level parameters (e.g. negotiated message size) for `info`. |
 | PROTO-2 | **Disconnect/release** cleanly, unwinding anything the module itself enabled server-side (mirrors RPT-7 at the module level). |
 | PROTO-3 | **Identify**, if the protocol has a native identify mechanism, returning (vendor, model, revision) marked `confirmed` (IDN-3). A module without one reports that source as absent, not as unknown-with-a-guess. |
-| PROTO-4 | **Browse** the model into the generic LD → LN → DO → DA tree with FC and CDC/type per node, and resolve dataset members. |
+| PROTO-4 | **Browse** the model into the generic LD → LN → DO → DA tree with FC and CDC/type per node, list each LN's control blocks, and resolve dataset members. How the protocol lays a logical node out on the wire stays inside the module. |
 | PROTO-5 | **Read / write** values as the protocol-independent typed representation the core defines (`ied_client/protocol/types.py`), deriving the type from the device's own model (RW-3) rather than guessing from input text. |
-| PROTO-6 | **Controls**: implement Select / SelectWithValue / Operate / Cancel / CommandTermination-wait per `ctlModel` (CTL-2), report AddCause / LastApplError in the standard enumeration, and declare which control patterns it cannot fully support (e.g. cannot surface orCat for some select variant) so `authority-probe` can mark them "not probeable" instead of guessing. |
-| PROTO-7 | **Reports**: enable/disable/reserve RCBs, deliver events into the generic Report shape (SqNum, EntryID, trigger reason, values), support takeover, and register its own cleanups with the core's cleanup registry (RPT-7) rather than unwinding silently on its own. |
+| PROTO-6 | **Controls**: implement Select / SelectWithValue / Operate / Cancel / CommandTermination-wait per `ctlModel` (CTL-2), report AddCause / LastApplError in the standard enumeration, and declare which control patterns it cannot fully support so `authority-probe` can mark them "not probeable" instead of guessing — today one capability, `select_carries_origin` (whether a select without a value carries orCat/orIdent to the device). |
+| PROTO-7 | **Reports**: enable/disable/reserve RCBs, decode `Owner` into the client address it names, deliver events into the generic Report shape (SqNum, EntryID, trigger reason, values), support takeover, and register its own cleanups with the core's cleanup registry (RPT-7) rather than unwinding silently on its own. Other control blocks (SGCB, LCB, GoCB, SVCB) are read, and setting groups selected, edited and confirmed (RW-7), through control-block services (ACSI GetSGCBValues, SelectActiveSG, SelectEditSG, ConfirmEditSGValues, …), never by addressing the control block as data. |
 | PROTO-8 | **Files**: list/download a read-only file directory if the protocol has file transfer at all; otherwise report the capability as absent, not as an error. |
 | PROTO-9 | **Layered diagnosis**: expose its own connection process as an ordered list of named layers below "model" (DIA-1) that the diagnosis engine can probe independently and stop at; each layer produces a structured result the generic engine can render. Provide a `classify` function that turns the module's own generic connect failure into a specific layer and reason (DIA-3). |
 | PROTO-10 | **Security-requirement detection** (optional): a check for "this device appears to require transport/association security this module doesn't implement," feeding DIA-6. A module without such a signal to check simply doesn't implement this. |
@@ -461,3 +468,5 @@ module's own spec, not here.
 | 2026-09-23 | OI-8: connection/session limits in v1 come from a quirks-style file (PROTO-12) and refusal classification (DIA-4). Active probing deferred to v2. |
 | 2026-09-25 | Spec split into this protocol-independent client spec and a per-protocol spec (MMS-PROTOCOL-SPEC.md), joined by the protocol module contract in §4.1, so that a future non-MMS module could reuse the CLI, safety model, verification engine and explanation system without rewriting them. `SPEC.md` is now a short index pointing to both. |
 | 2026-09-25 | Code split to match (ARC-5): the client is the `ied_client` package, the protocol module contract is `ied_client.protocol`, and the MMS module is the separate `mms_protocol` package, found through the `ied_client.protocols` entry point. Error-code domains are an open registry that modules extend. OI-9 moved here from the MMS spec, since the `ldNs` mapping reads a data-model attribute and is protocol-independent. |
+| 2026-09-25 | Scope of the protocol module contract: the tool is an IEC 61850 client and a protocol module is an IEC 61850 SCSM (MMS/8-1 today). The contract is expressed in ACSI terms (object and control block references, FCs, the control model); protocols without the IEC 61850 data model are out of scope (§2.3). Replaces the earlier "or a non-MMS protocol entirely" wording. |
+| 2026-09-25 | The tool is renamed `ied-client` (it is an IEC 61850 client; MMS is one protocol module). For a transition period the old name keeps working: the `mms-client` command, `MMS_CLIENT_*` environment variables, session logs in the old state directory (searched by `restore --last` and `log`) and snapshots of kind `mms-client-snapshot`. New files are written under the new name. |

@@ -164,7 +164,7 @@ class MmsConnectionDiagnosis:
                     ("The device appears to require TLS (IEC 62351): TCP 102 is closed but TCP 3782 answers."
                      if failure.security == "tls"
                      else "The device appears to require ACSE authentication.")
-                    + " mms-client v1 does not support MMS security, so it cannot associate with this device."
+                    + " This tool (v1) does not support MMS security, so it cannot associate with this device."
                 )
                 cert = "likely"
             extra = []

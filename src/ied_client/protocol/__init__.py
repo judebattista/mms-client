@@ -4,15 +4,19 @@ from .api import Association, ConnectionDiagnosis, ControlObject, FailedAssociat
 from .errors import ConnectError, EncodeError, NotConnectedError, ProtocolError, ServiceError
 from .registry import DEFAULT_PROTOCOL, UnknownProtocolError, available, get, load_all, register, unregister
 from .types import (
+    CONTROL_BLOCK_KINDS,
     RCB_WRITABLE,
     AccessError,
     BinaryTime,
     BitString,
     CommandTermination,
+    ControlBlockInfo,
     ControlStepResult,
+    DataNode,
     DataSetMember,
     DatasetRef,
     FileEntry,
+    LogicalNodeModel,
     RawValue,
     RcbValues,
     Report,
@@ -29,6 +33,7 @@ from .types import (
 from .values import coerce, parse_text
 
 __all__ = [
+    "CONTROL_BLOCK_KINDS",
     "DEFAULT_PROTOCOL",
     "RCB_WRITABLE",
     "AccessError",
@@ -38,13 +43,16 @@ __all__ = [
     "CommandTermination",
     "ConnectError",
     "ConnectionDiagnosis",
+    "ControlBlockInfo",
     "ControlObject",
     "ControlStepResult",
+    "DataNode",
     "DataSetMember",
     "DatasetRef",
     "EncodeError",
     "FailedAssociation",
     "FileEntry",
+    "LogicalNodeModel",
     "Naming",
     "NotConnectedError",
     "ProtocolError",

@@ -74,7 +74,7 @@ def test_parsers_never_exit():
     p = registry.get("read").parser(oneshot=True)
     with pytest.raises(UsageError) as ei:
         p.parse_args([])
-    assert "required" in str(ei.value) and ei.value.usage.startswith("usage: mms-client read")
+    assert "required" in str(ei.value) and ei.value.usage.startswith("usage: ied-client read")
 
 
 def test_register_rejects_duplicates():

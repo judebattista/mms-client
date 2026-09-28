@@ -1,9 +1,10 @@
-# mms-client — Specification index
+# ied-client — Specification index
 
 **Status:** Draft 0.4 (2026-09-25) — v1 implementation in progress; see decision records.
 
-As of this draft, the specification is split into two documents so that the protocol-independent
-parts of the tool can be described once and reused if a second protocol is ever added:
+As of this draft, the specification is split into two documents so that the parts of this IEC 61850
+client that do not depend on the wire protocol can be described once and reused if a second IEC 61850
+protocol mapping (SCSM) is ever added:
 
 - **[IED-CLIENT-SPEC.md](IED-CLIENT-SPEC.md)** — the general IED client: purpose, scope, CLI,
   users/modes/safety, the data model (browsing, read/write, controls, reports), verification,

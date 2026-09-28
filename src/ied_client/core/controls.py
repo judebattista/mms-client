@@ -671,6 +671,15 @@ def authority_probe(
             row.note = "not probeable (no select step: " + codes.CTL_MODELS.get(row.ctl_model, f"ctlModel {row.ctl_model}") + ")"
             row.cells = [ProbeCell(c, None, note="not probeable") for c in cats]
             continue
+        if row.ctl_model == 2 and not session.protocol.select_carries_origin:
+            # The protocol's select without a value carries no originator, so the device cannot be deciding by
+            # orCat and a per-orCat result would mean nothing (ORG-5, PROTO-6). Send nothing to the object.
+            row.note = (
+                "not probeable (the select of sbo-with-normal-security carries no orCat over "
+                f"{session.protocol.display_name})"
+            )
+            row.cells = [ProbeCell(c, None, note="not probeable") for c in cats]
+            continue
         node = model.resolve(ref).node
         assert node is not None
         ctl_val_spec = node.children["Oper"].specs["CO"].child("ctlVal")
@@ -685,14 +694,12 @@ def authority_probe(
             ctl.configure(or_ident=session.or_ident, or_cat=c)
             if row.ctl_model == 2:
                 step = ctl.select()
-                note = session.protocol.sbo_normal_select_note
             else:
                 step = ctl.select_with_value(ctl_val_spec, probe_value) if ctl_val_spec else None
-                note = ""
             if step is None:
                 row.cells.append(ProbeCell(c, None, note="no ctlVal"))
                 continue
-            cell = ProbeCell(c, step.ok, step.add_cause, None if step.ok else step.ied_error, note)
+            cell = ProbeCell(c, step.ok, step.add_cause, None if step.ok else step.ied_error)
             row.cells.append(cell)
             if step.ok:
                 cancelled = ctl.cancel()

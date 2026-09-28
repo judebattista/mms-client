@@ -359,6 +359,106 @@ class DataSetMember:
     problem: str | None = None
 
 
+# ---------------------------------------------------------------------------
+# The model of a logical node (PROTO-4)
+# ---------------------------------------------------------------------------
+@dataclass(slots=True)
+class DataNode:
+    """A DO/SDO/DA/BDA, merged over FCs. ``specs`` maps FC → the type at this node, i.e. the type of the
+    functionally constrained data (FCD) the node and that FC name."""
+
+    name: str
+    specs: dict[str, VarSpec] = field(default_factory=dict)
+    children: dict[str, DataNode] = field(default_factory=dict)
+
+    @property
+    def fcs(self) -> list[str]:
+        return list(self.specs)
+
+    def is_leaf(self) -> bool:
+        return not self.children
+
+    def merge(self, fc: str, spec: VarSpec) -> None:
+        """Add this node's type under ``fc``; a structure's components become (or join) child nodes."""
+        self.specs[fc] = spec
+        if spec.kind is ValueKind.STRUCTURE:
+            for c in spec.children:
+                if c.name is None:
+                    continue
+                node = self.children.get(c.name)
+                if node is None:
+                    node = self.children[c.name] = DataNode(c.name)
+                node.merge(fc, c)
+
+    def to_json(self) -> dict:
+        return {"name": self.name, "fcs": {fc: s.type_name() for fc, s in self.specs.items()}}
+
+
+# Control block kind by the FC the client names it with (``LD/LN.<FC>.<name>``); SGCB is named with SP.
+CONTROL_BLOCK_KINDS: dict[str, str] = {
+    "RP": "URCB",
+    "BR": "BRCB",
+    "GO": "GoCB",
+    "MS": "MSVCB",
+    "US": "USVCB",
+    "LG": "LCB",
+    "SP": "SGCB",
+}
+
+
+@dataclass(slots=True)
+class ControlBlockInfo:
+    """A control block of a logical node. ``spec`` is the structure of its attributes (ACSI names such as
+    ``RptID``, ``ActSG``), as the device declares them; a protocol module passes it back to itself."""
+
+    ld: str
+    ln: str
+    name: str
+    fc: str  # RP, BR, GO, MS, US, LG, SP (SGCB)
+    spec: VarSpec
+
+    @property
+    def reference(self) -> str:
+        """IEC-style reference with the FC, e.g. ``LD/LLN0.BR.brcb01`` (how the client names control blocks)."""
+        return f"{self.ld}/{self.ln}.{self.fc}.{self.name}"
+
+    @property
+    def kind(self) -> str:
+        return CONTROL_BLOCK_KINDS[self.fc]
+
+    @property
+    def attribute_names(self) -> set[str]:
+        return {c.name for c in self.spec.children if c.name}
+
+
+@dataclass(slots=True)
+class LogicalNodeModel:
+    """What a logical node contains, in IEC 61850 terms: its data objects (merged over FCs) and its
+    control blocks. A protocol module builds one with :meth:`add_data` and :meth:`add_control_block`."""
+
+    data: dict[str, DataNode] = field(default_factory=dict)
+    control_blocks: dict[str, ControlBlockInfo] = field(default_factory=dict)
+
+    def add_data(self, fc: str, spec: VarSpec) -> None:
+        """Add a data object's type under one FC (the FCD ``DO[fc]``); call once per FC it exists under."""
+        if spec.name is None:
+            return
+        node = self.data.get(spec.name)
+        if node is None:
+            node = self.data[spec.name] = DataNode(spec.name)
+        node.merge(fc, spec)
+
+    def add_control_block(self, cb: ControlBlockInfo) -> None:
+        self.control_blocks[cb.name] = cb
+
+    @property
+    def fcs(self) -> list[str]:
+        """The FCs present in the LN, in the order first seen."""
+        seen = dict.fromkeys(fc for node in self.data.values() for fc in node.specs)
+        seen.update(dict.fromkeys(cb.fc for cb in self.control_blocks.values()))
+        return list(seen)
+
+
 @dataclass(frozen=True, slots=True)
 class FileEntry:
     name: str
@@ -380,6 +480,9 @@ class RcbValues:
 
     ``dataset`` is the DatSet value as the device reports it (the protocol's own form); ``trg_ops``
     and ``opt_flds`` use the bit encoding of :data:`ied_client.codes.TRG_OPS` / ``OPT_FLDS``.
+    ``owner`` is the raw Owner octet string; ``owner_address`` is the client address it names,
+    decoded by the protocol module in its own mapping's form (8-1 puts the client's IP address
+    there). ``owner_address`` is None when Owner is absent, empty or all-zero, or not decodable.
     """
 
     reference: str
@@ -400,6 +503,7 @@ class RcbValues:
     time_of_entry_ms: int | None = None
     resv_tms: int | None = None
     owner: bytes | None = None
+    owner_address: str | None = None
 
     def to_json(self) -> dict:
         d = {k: getattr(self, k) for k in self.__slots__}

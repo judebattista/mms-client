@@ -32,7 +32,7 @@ def run_json(capsys, argv):
 
 def assert_envelope(env, command, ok):
     assert env["schema_version"] == "1.0"
-    assert env["tool"]["name"] == "mms-client" and "version" in env["tool"] and "libiec61850" in env["tool"]
+    assert env["tool"]["name"] == "ied-client" and "version" in env["tool"] and "libiec61850" in env["tool"]
     assert env["command"] == command
     assert env["ok"] is ok
     assert "generated_at" in env and "result" in env and "exit_code" in env
@@ -71,7 +71,7 @@ def test_set_one_shot_points_to_the_option(capsys):
 
 def test_no_arguments_prints_help_and_exits_2(capsys):
     assert main([]) == 2
-    assert "usage: mms-client" in capsys.readouterr().out
+    assert "usage: ied-client" in capsys.readouterr().out
     assert main(["--help"]) == 0
     out = capsys.readouterr().out
     assert "GOOSE" in out and "exit codes" in out and "--orcat" in out
@@ -79,7 +79,7 @@ def test_no_arguments_prints_help_and_exits_2(capsys):
 
 def test_version(capsys):
     assert main(["--version"]) == 0
-    assert capsys.readouterr().out.startswith("mms-client ")
+    assert capsys.readouterr().out.startswith("ied-client ")
 
 
 def test_bad_inventory_is_a_usage_error(tmp_path, capsys):
@@ -92,7 +92,7 @@ def test_bad_inventory_is_a_usage_error(tmp_path, capsys):
 def test_help_for_one_command(capsys):
     assert main(["read", "-h"]) == 0
     out = capsys.readouterr().out
-    assert "usage: mms-client read" in out and "device" in out
+    assert "usage: ied-client read" in out and "device" in out
 
 
 # ---------------------------------------------------------------------------------- error mapping

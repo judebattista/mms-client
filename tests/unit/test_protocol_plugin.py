@@ -17,7 +17,7 @@ import pytest
 from ied_client import codes
 from ied_client.cli.main import main
 from ied_client.codes import ErrorInfo
-from ied_client.core import datasets, readwrite
+from ied_client.core import datasets, readwrite, setgroup
 from ied_client.core.identity import identify
 from ied_client.core.refs import ObjectRef, RefError
 from ied_client.core.results import Status
@@ -30,8 +30,10 @@ from ied_client.protocol import (
     AccessError,
     Association,
     ConnectError,
+    ControlBlockInfo,
     DataSetMember,
     DatasetRef,
+    LogicalNodeModel,
     ProtocolModule,
     ServerIdentity,
     ServiceError,
@@ -57,8 +59,17 @@ GGIO1 = _struct(
     "GGIO1",
     _struct("ST", _struct("Ind1", VarSpec(ValueKind.BOOLEAN, "stVal"), VarSpec(ValueKind.BIT_STRING, "q", -13))),
     _struct("SP", _struct("Setp", VarSpec(ValueKind.INTEGER, "setVal", 32))),
+    _struct("SG", _struct("Gain", VarSpec(ValueKind.INTEGER, "setVal", 32))),
+    _struct("SE", _struct("Gain", VarSpec(ValueKind.INTEGER, "setVal", 32))),
 )
 LLN0 = _struct("LLN0", _struct("ST", _struct("Mod", VarSpec(ValueKind.INTEGER, "stVal", 8))))
+SGCB = _struct(
+    "SGCB",
+    VarSpec(ValueKind.UNSIGNED, "NumOfSG", 8),
+    VarSpec(ValueKind.UNSIGNED, "ActSG", 8),
+    VarSpec(ValueKind.UNSIGNED, "EditSG", 8),
+    VarSpec(ValueKind.BOOLEAN, "CnfEdit"),
+)
 
 
 class FakeNaming:
@@ -107,6 +118,10 @@ class FakeAssociation:
         }
         self.open = True
         self.writes: list[tuple[str, Any]] = []
+        # setting groups: values per group, the active group, the group being edited and its edit buffer
+        self.groups: dict[int, dict[tuple[str, ...], int]] = {1: {("Gain", "setVal"): 10}, 2: {("Gain", "setVal"): 20}}
+        self.act_sg, self.edit_sg = 1, 0
+        self.edit_buffer: dict[tuple[str, ...], int] = {}
 
     @property
     def is_connected(self) -> bool:
@@ -137,8 +152,17 @@ class FakeAssociation:
     def logical_nodes(self, ld: str) -> list[str]:
         return ["LLN0", "GGIO1"]
 
-    def logical_node_spec(self, ld: str, ln: str) -> VarSpec:
+    def _ln_type(self, ln: str) -> VarSpec:
         return {"LLN0": LLN0, "GGIO1": GGIO1}[ln]
+
+    def logical_node(self, ld: str, ln: str) -> LogicalNodeModel:
+        m = LogicalNodeModel()
+        for fc_group in self._ln_type(ln).children:
+            for do in fc_group.children:
+                m.add_data(fc_group.name or "", do)
+        if ln == "LLN0":
+            m.add_control_block(ControlBlockInfo(ld, ln, "SGCB", "SP", SGCB))
+        return m
 
     def datasets(self, ld: str) -> list[DatasetRef]:
         return [DatasetRef(ld, "LLN0", "Events")]
@@ -148,11 +172,15 @@ class FakeAssociation:
         return [DataSetMember(FakeNaming().data(ref), ref), DataSetMember("LD1|???", None, "unparseable")], False
 
     def _value(self, ref: ObjectRef) -> Any:
-        spec = self.logical_node_spec(ref.ld, ref.ln or "").child(ref.fc or "")
+        spec = self._ln_type(ref.ln or "").child(ref.fc or "")
         spec = spec.find(ref.path) if spec is not None else None
         if spec is None:
             return AccessError(_err("no-such-object"))
         if spec.is_basic:
+            if ref.fc == "SG":
+                return self.groups[self.act_sg][ref.path]
+            if ref.fc == "SE":
+                return self.edit_buffer[ref.path] if self.edit_sg else AccessError(_err("denied"))
             return self.values.get((ref.ld, ref.ln, ref.fc, ref.path), 0)
         return {c.name: self._value(ref.child(c.name or "")) for c in spec.children}
 
@@ -163,8 +191,11 @@ class FakeAssociation:
         return [self._value(r) for r in refs]
 
     def write(self, ref: ObjectRef, spec: VarSpec, value: Any) -> None:
-        if ref.fc == "ST":
+        if ref.fc == "ST" or (ref.fc == "SE" and not self.edit_sg):
             raise ServiceError("write", FakeNaming().data(ref), _err("denied"))
+        if ref.fc == "SE":
+            self.edit_buffer[ref.path] = coerce(spec, value)
+            return
         self.values[(ref.ld, ref.ln, ref.fc, ref.path)] = coerce(spec, value)
         self.writes.append((FakeNaming().data(ref), value))
 
@@ -182,6 +213,19 @@ class FakeAssociation:
 
     def uninstall_report_handler(self, reference: str) -> None:
         pass
+
+    def get_control_block(self, cb: ControlBlockInfo) -> dict[str, Any]:
+        return {"NumOfSG": len(self.groups), "ActSG": self.act_sg, "EditSG": self.edit_sg, "CnfEdit": False}
+
+    def select_active_sg(self, cb: ControlBlockInfo, group: int) -> None:
+        self.act_sg = group
+
+    def select_edit_sg(self, cb: ControlBlockInfo, group: int) -> None:
+        self.edit_sg = group
+        self.edit_buffer = dict(self.groups[group]) if group else {}
+
+    def confirm_edit_sg_values(self, cb: ControlBlockInfo) -> None:
+        self.groups[self.edit_sg].update(self.edit_buffer)
 
     def file_directory(self, directory: str = "") -> list:
         return []
@@ -222,7 +266,7 @@ class FakeProtocol:
     names = FakeNaming()
     identify_source = "fake-identify"
     blind_spots = "The fake protocol sees only its own loopback device."
-    sbo_normal_select_note = ""
+    select_carries_origin = True
     association_layers = ("fake-link",)
     next_steps = {"fake-link": ["Check the fake link."]}
 
@@ -324,6 +368,23 @@ def test_datasets_identity_and_snapshot(fake):
         assert snap.configuration["LD1/GGIO1.Setp.setVal[SP]"] == 7
         assert snap.configuration["identity:fake-identify.vendor"] == "FakeVendor"
         assert snap.metadata["tool"]["fakelib"] == "9.9"
+        assert snap.structure["control_blocks"]["LD1/LLN0.SP.SGCB"]["NumOfSG"] == 2
+        assert snap.configuration["LD1/GGIO1.Gain.setVal[SG]"] == 10
+    finally:
+        s.close()
+
+
+def test_setting_groups_through_the_modules_sgcb_services(fake):
+    s = _session(fake)
+    dev = fake.opened[-1]
+    try:
+        [st] = setgroup.show(s)
+        assert (st.values["NumOfSG"], st.values["ActSG"]) == (2, 1)
+        setgroup.activate(s, 2, confirm=False)
+        assert readwrite.read(s, "LD1/GGIO1.Gain.setVal[SG]").value == 20
+        res = setgroup.edit(s, 1, [("LD1/GGIO1.Gain.setVal", "15")], confirm=False)
+        assert (res.confirmed, res.verified) == (True, True)
+        assert (dev.groups[1][("Gain", "setVal")], dev.edit_sg, dev.act_sg) == (15, 0, 2)
     finally:
         s.close()
 

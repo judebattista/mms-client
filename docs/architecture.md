@@ -41,10 +41,11 @@ the contract is sufficient on its own.
 * `api.py` — `typing.Protocol` interfaces a module implements:
   * `ProtocolModule` — name, display name, default port, `names`, `open()` → `Association`, `versions()`,
     `describe_association()`, `connection_diagnosis()`, `classify_failed_association()` (for discover),
-    the texts the client shows (`identify_source`, `blind_spots`, `sbo_normal_select_note`,
-    `association_layers`, `next_steps`), and its data files (`catalogue_sources()`, `quirks_sources()`).
-  * `Association` — one open association: identify, directory (LDs, LNs, LN type, datasets), read /
-    read_many / write by `ObjectRef` with the device's `VarSpec`, RCB get/set and report handlers, files,
+    the texts the client shows (`identify_source`, `blind_spots`, `association_layers`, `next_steps`),
+    capabilities (`select_carries_origin`), and its data files (`catalogue_sources()`, `quirks_sources()`).
+  * `Association` — one open association: identify, directory (LDs, LNs, LN contents, datasets), read /
+    read_many / write by `ObjectRef` with the device's `VarSpec`, RCB get/set (with `Owner` already decoded
+    to an address) and report handlers, other control blocks and setting groups, files,
     `control(ref)` → `ControlObject`, release/abort/close, closed listeners.
   * `Naming` — the protocol's native spelling of references (`key` is the JSON field, e.g. `"mms"`). The
     core keeps `ObjectRef` / `DatasetRef`; native names are opaque strings it only prints and parses back.
@@ -88,9 +89,13 @@ refused by the device, 2 usage, 3 connection failed or lost, 4 refused by policy
   session is registered *before* it is made, and undone in reverse order on exit, Ctrl-C (SIGTERM is mapped
   to KeyboardInterrupt) or disconnect; what cannot be undone (connection lost) is reported with its
   lingering effect. `session.parse_ref(text)` accepts IEC references and the protocol's native names.
-* `model.py` — browsing through the `Association` directory services: LDs, LNs, one LN type description
-  per LN, FC branches merged into an IEC view (LD → LN → DO → DA, each node knowing its FCs). Control
-  blocks (RP/BR/LG/GO/MS/US and the SGCB) are kept separately.
+* `model.py` — browsing through the `Association` directory services: LDs, LNs, and per LN a
+  `LogicalNodeModel` from `Association.logical_node` — the IEC view (LD → LN → DO → DA, each node knowing
+  its type per FC) and the LN's control blocks (URCB/BRCB/LCB/GoCB/SVCB and the SGCB). How the protocol
+  lays an LN out on the wire (for MMS: one variable grouped by FC) is the module's business.
+* Control blocks are reached through services, never as data: `get_rcb`/`set_rcb` for RCBs,
+  `get_control_block` for the others, and `select_active_sg`/`select_edit_sg`/`confirm_edit_sg_values`
+  for setting groups (`setgroup.py`).
 * `readwrite.py`, `controls.py`, `reports.py`, `setgroup.py`, `files.py`, `restore.py`, `identity.py`,
   `datasets.py`, `incident.py` — one module per spec area. Each returns structured results that the CLI
   renders as text or JSON (ARC-3, `results.envelope`). Results that name an object carry both the IEC
@@ -121,7 +126,9 @@ re-assessment and the edition compatibility check (IDN-8). `discover` (DIA-5) is
 
 * `module.py` — `MmsProtocol`, the object the entry point exposes (`mms_protocol:protocol`).
 * `association.py` — `MmsAssociation`, the `Association` over `adapter.IedClient` (one GetNameList /
-  GetVariableAccessAttributes per LN, readMultiple grouped per LD).
+  GetVariableAccessAttributes per LN, whose FC-grouped type `ln_model` splits into data objects and
+  control blocks; readMultiple grouped per LD; SGCB and other non-report control blocks read and written
+  as the structured variables IEC 61850-8-1 maps them to).
 * `names.py` — `MmsNaming`: `LD/LN$FC$DO$DA`, `LD/LN$dataset`, `LD/LN$RP$name`.
 * `codes.py` — the `ied`, `mms`, `data-access` and `acse-diag` domains and the full association outcomes.
 * `libiec_config.py` — SCL → libiec61850 model config (used by the simulator in `tests/sim`).

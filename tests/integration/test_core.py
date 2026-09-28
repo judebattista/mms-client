@@ -62,7 +62,7 @@ def test_operate_sequences(sim, obj, value):
             assert isinstance(out.final, BitString) and out.final.as_int_msb0() == 2
         origin = controls.last_origin(s, f"{LD}/GGIO1.{obj}")
         assert origin["origin"]["orCat"] == 2 and origin["orCat_name"] == "station-control"
-        assert origin["orIdent_text"].startswith("mms-client/")
+        assert origin["orIdent_text"].startswith("ied-client/")
     finally:
         s.close()
 
@@ -186,9 +186,18 @@ def test_empty_sbo_answer_is_not_reported_as_a_device_add_cause(sim):
 def test_authority_probe_matrix(sim):
     s = make_session(sim, ["authority-probe"])
     try:
+        before = len(sim.events)
         rows = {r.ref.iec(): r for r in controls.authority_probe(s)}
         direct = rows[f"{LD}/GGIO1.SPCSO1"]
         assert all(c.accepted is None for c in direct.cells) and "not probeable" in direct.note
+        # sbo-with-normal-security (ctlModel=2, GGIO1.SPCSO2): a select without a value carries no orCat
+        # over MMS (ORG-5), so it is listed as not probeable and nothing is sent to the device.
+        normal = rows[f"{LD}/GGIO1.SPCSO2"]
+        assert normal.ctl_model == 2
+        assert all(c.accepted is None for c in normal.cells) and "not probeable" in normal.note
+        assert "carries no orCat" in normal.note
+        new_events = sim.events[before:]
+        assert not any(e.get("event") == "check" and e.get("ref") == f"{LD}/GGIO1.SPCSO2" for e in new_events)
         loc = rows[f"{LD}/GGIO2.SPCSO1"]
         by_cat = {c.or_cat: c for c in loc.cells}
         assert by_cat[1].accepted is True

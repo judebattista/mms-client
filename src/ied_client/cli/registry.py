@@ -1,7 +1,7 @@
 """The command registry shared by the shell and one-shot mode (CLI-6).
 
 Every command is registered once, with its argparse definition and a handler
-``(ctx, args) -> CommandResult``. The shell and ``mms-client <command> <device> …`` both look
+``(ctx, args) -> CommandResult``. The shell and ``ied-client <command> <device> …`` both look
 commands up here, build the same parser (one-shot mode adds the ``device`` positional) and call the
 same handler; the runner renders the result as text or as the JSON envelope (ARC-3).
 

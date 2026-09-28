@@ -1,4 +1,4 @@
-# Tool-level codes: refusals and failures raised by mms-client itself (policy, input, sequencing).
+# Tool-level codes: refusals and failures raised by the tool itself (policy, input, sequencing).
 # Format: see the header of data/hints.yaml.
 #
 # These are decided by the tool, so `fact` is appropriate when the text only states what the tool
@@ -133,6 +133,26 @@ entries:
     - "If authority must be tested, use `operate` deliberately with the orCat in question"
   related: [ctlmodel.direct-with-normal-security, ctlmodel.direct-with-enhanced-security, control.sbo]
   hint: "Direct-control objects have no select step, so `authority-probe` cannot test them without operating"
+  certainty: fact
+
+- id: tool.not-probeable-select-without-origin
+  keys: [tool:not-probeable-select-without-origin]
+  title: SBO-with-normal-security object not probeable
+  summary: >-
+    `authority-probe` tests authority by comparing what each orCat gets back from a select. On an
+    sbo-with-normal-security object the select carries no orCat with the protocol in use, so the
+    device cannot be reacting to the orCat sent and a per-orCat result would mean nothing.
+  details: |
+    A select without a value (ctlModel=2, sbo-with-normal-security) has no place for orCat or orIdent
+    in some protocols; the protocol module says whether its select carries them. When it does not,
+    whatever the device accepts or refuses cannot depend on the originator, so the tool sends nothing
+    and lists the object as not probeable rather than print a matrix that looks meaningful but is not.
+  next_checks:
+    - "Test authority on an sbo-with-enhanced-security object at this IED instead (its select carries orCat)"
+    - "Use `origin` after a real client's control to see what it actually sent"
+    - "Take a packet capture of a real client's select on this object to see what the device does with it"
+  related: [ctlmodel.sbo-with-normal-security, control.sbo, tool:not-probeable-direct-control]
+  hint: "With this protocol the select of an sbo-with-normal-security object carries no orCat, so `authority-probe` cannot test it"
   certainty: fact
 
 - id: tool.rcb-no-free-instance

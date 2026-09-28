@@ -30,7 +30,8 @@ def test_double_dash_protects_values():
 
 
 def test_inventory_default_from_environment(monkeypatch):
-    monkeypatch.setenv("MMS_CLIENT_INVENTORY", "/tmp/rack.yaml")
+    monkeypatch.setenv("IED_CLIENT_INVENTORY", "/tmp/rack.yaml")
+    monkeypatch.setenv("MMS_CLIENT_INVENTORY", "/tmp/old.yaml")  # the new name wins over the old one
     ns, _ = split_options(global_parser(), ["read", "x", "y"])
     assert Options.from_namespace(ns).inventory == "/tmp/rack.yaml"
 

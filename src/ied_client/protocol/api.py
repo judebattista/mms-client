@@ -20,10 +20,12 @@ from ied_client.codes import ErrorInfo
 
 from .types import (
     CommandTermination,
+    ControlBlockInfo,
     ControlStepResult,
     DataSetMember,
     DatasetRef,
     FileEntry,
+    LogicalNodeModel,
     RcbValues,
     Report,
     ServerIdentity,
@@ -133,8 +135,8 @@ class Association(Protocol):
 
     def logical_nodes(self, ld: str) -> list[str]: ...
 
-    def logical_node_spec(self, ld: str, ln: str) -> VarSpec:
-        """The LN's type: a structure whose children are the FCs, each a structure of data objects."""
+    def logical_node(self, ld: str, ln: str) -> LogicalNodeModel:
+        """The LN's data objects (each with its type per FC) and its control blocks."""
 
     def datasets(self, ld: str) -> list[DatasetRef]: ...
 
@@ -164,6 +166,21 @@ class Association(Protocol):
         """Deliver reports of ``reference`` to ``callback``, which may run on another thread."""
 
     def uninstall_report_handler(self, reference: str) -> None: ...
+
+    # -- other control blocks (PROTO-7): SGCB, LCB, GoCB, MSVCB/USVCB, read-only
+    def get_control_block(self, cb: ControlBlockInfo) -> dict[str, Value]:
+        """Attribute values of a control block other than an RCB, keyed by ACSI attribute name
+        (GetSGCBValues, GetLCBValues, GetGoCBValues, Get…VCBValues). Raises :class:`ServiceError`."""
+
+    # -- setting groups (RW-7); ``cb`` is an SGCB
+    def select_active_sg(self, cb: ControlBlockInfo, group: int) -> None:
+        """SelectActiveSG: make ``group`` the active setting group."""
+
+    def select_edit_sg(self, cb: ControlBlockInfo, group: int) -> None:
+        """SelectEditSG: copy ``group`` into the editable (FC=SE) values; 0 ends the edit without storing."""
+
+    def confirm_edit_sg_values(self, cb: ControlBlockInfo) -> None:
+        """ConfirmEditSGValues: store the SE values in the group being edited."""
 
     # -- files (PROTO-8)
     def file_directory(self, directory: str = "") -> list[FileEntry]: ...
@@ -203,8 +220,9 @@ class ProtocolModule(Protocol):
     identify_source: str  # label of the protocol's identify service as an identity source (IDN-1)
     # What the protocol cannot observe, stated in `diagnose` output (e.g. GOOSE/SV for MMS).
     blind_spots: str
-    # Why a select without a value carries no originator, if that is so (ORG-5); "" otherwise.
-    sbo_normal_select_note: str
+    # Whether a select without a value (sbo-with-normal-security) carries the originator (orCat/orIdent)
+    # to the device (ORG-5, PROTO-6).
+    select_carries_origin: bool
     # The `diagnose` layers the connection diagnosis may add, in order; a failure in one is a failure to
     # associate (exit code 3).
     association_layers: tuple[str, ...]

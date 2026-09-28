@@ -6,7 +6,7 @@ and — just as important — what it does **not** do.
 
 ## Modes are a guardrail, not access control (MOD-4)
 
-`mms-client` has two modes:
+`ied-client` has two modes:
 
 | | standard (default) | expert (`--expert`, or `set mode expert` in the shell) |
 |---|---|---|

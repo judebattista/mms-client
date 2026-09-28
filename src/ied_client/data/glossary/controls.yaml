@@ -210,7 +210,7 @@ entries:
     Who sent a command: the category of sender (orCat) and a free identifier (orIdent). The device
     stores the origin of the last command it received.
   details: |
-    This tool sends `mms-client/<user>@<host>` as orIdent unless told otherwise. Reading
+    This tool sends `ied-client/<user>@<host>` as orIdent unless told otherwise. Reading
     `<object>.origin` shows what the last sender used, for example to see what a gateway sends.
   related: [control.orcat, control.ctlnum]
 

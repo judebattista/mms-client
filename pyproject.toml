@@ -1,5 +1,5 @@
 [project]
-name = "mms-client"
+name = "ied-client"
 version = "0.1.0"
 description = "IEC 61850 IED client (with a pluggable MMS protocol module) for verifying and troubleshooting IEDs in a test rack"
 readme = "README.md"
@@ -15,7 +15,8 @@ dependencies = [
 ]
 
 [project.scripts]
-mms-client = "ied_client.cli.main:main"
+ied-client = "ied_client.cli.main:main"
+mms-client = "ied_client.cli.main:main"  # the old name, kept during the transition
 
 # Protocol modules the client can drive (IED-CLIENT-SPEC.md §4.1). A module registers itself here
 # with the ProtocolModule object it exports; the client never imports a module by name.

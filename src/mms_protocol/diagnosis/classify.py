@@ -314,7 +314,7 @@ def classify_association(
             Finding(
                 codes.tool("security-not-supported").key,
                 "likely",
-                f"the IED appears to require TLS (IEC 62351): {why}. This version of mms-client has no TLS support, "
+                f"the IED appears to require TLS (IEC 62351): {why}. This tool has no TLS support in v1, "
                 "so it cannot associate with this IED; enable an unsecured MMS port on the IED for testing, or use a "
                 "client with TLS",
                 [e for e in evidence if e.startswith(("tcp-", "cotp"))],
@@ -344,7 +344,7 @@ def classify_association(
                 Finding(
                     codes.tool("security-not-supported").key,
                     certainty,
-                    f"{auth_text}: it expects ACSE authentication (e.g. a password). This version of mms-client does "
+                    f"{auth_text}: it expects ACSE authentication (e.g. a password). This tool does "
                     "not support ACSE authentication (no security in v1), so it cannot associate with this IED as "
                     "configured",
                     [e for e in evidence if e.startswith("acse")],

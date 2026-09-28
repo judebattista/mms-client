@@ -264,6 +264,9 @@ def authority_probe(ctx: CliContext, args) -> CommandResult:
             )
         out.table(cols, table_rows, title=f"Authority probe on {s.device_name} (Select + Cancel; nothing operated)")
         out.note("Direct-control objects have no select step and are listed as not probeable.")
+        if not s.protocol.select_carries_origin and any(r.get("ctl_model") == "sbo-with-normal-security" for r in data["rows"]):
+            out.note(f"Over {s.protocol.display_name} the select of sbo-with-normal-security objects carries no orCat, so they "
+                     "are listed as not probeable (`explain tool:not-probeable-select-without-origin`).")
 
     return CommandResult(data=data, text=text)
 

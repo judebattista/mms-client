@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import threading
 import time
 import uuid
@@ -12,17 +11,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ied_client import ENV_PREFIX, TOOL_NAME
+from ied_client import LEGACY_TOOL_NAME, env, state_dir
 
 from .results import SCHEMA_VERSION, jsonable
 
 
 def default_log_dir() -> Path:
-    base = os.environ.get(f"{ENV_PREFIX}_LOG_DIR")
+    base = env("LOG_DIR")
     if base:
         return Path(base)
-    state = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    return Path(state) / TOOL_NAME / "sessions"
+    return state_dir() / "sessions"
+
+
+def legacy_log_dir() -> Path:
+    """Where the tool wrote session logs by default under its old name (mms-client)."""
+    return state_dir(LEGACY_TOOL_NAME) / "sessions"
 
 
 class SessionLog:

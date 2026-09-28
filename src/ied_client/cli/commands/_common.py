@@ -46,11 +46,9 @@ def step_error(step: Any) -> ErrorInfo:
 
 
 def session_logs(ctx: CliContext) -> list[Path]:
-    """Session logs in the log directory, newest first."""
-    d = ctx.log_dir
-    if not d.is_dir():
-        return []
-    return sorted(d.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+    """Session logs in the log directories, newest first."""
+    logs = [p for d in ctx.log_dirs if d.is_dir() for p in d.glob("*.jsonl")]
+    return sorted(logs, key=lambda p: p.stat().st_mtime, reverse=True)
 
 
 def latest_log_for(ctx: CliContext, device: str | None, *, exclude: Path | None = None) -> Path | None:

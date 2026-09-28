@@ -11,6 +11,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ied_client import TOOL_NAME
+
 from .results import SCHEMA_VERSION, envelope, jsonable
 from .session import Session
 
@@ -30,7 +32,7 @@ def build_incident(
         log_entries = read_log(Path(source_log))
     inv = session.inventory
     body = {
-        "kind": "mms-client-incident",
+        "kind": f"{TOOL_NAME}-incident",
         "incident_schema_version": SCHEMA_VERSION,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "note": note,

@@ -68,6 +68,22 @@ def _check_ied(service: str, target: str | None, err: C.c_int) -> None:
         raise ServiceError(service, target, ied_error(err.value))
 
 
+def owner_address(owner: bytes | None) -> str | None:
+    """Decode an RCB Owner octet string to the client address it names (8-1 convention):
+    libiec61850 and most IEDs put the client's IPv4 address in the last four octets (IPv6 in
+    16). None if Owner is absent, empty or all-zero, or not decodable."""
+    if not owner or not any(owner):
+        return None
+    if len(owner) >= 16 and any(owner[:-4]):
+        import ipaddress
+
+        try:
+            return str(ipaddress.IPv6Address(bytes(owner[-16:])))
+        except ValueError:
+            return None
+    return ".".join(str(b) for b in owner[-4:])
+
+
 class IedClient:
     """One association with one server. Not reusable after :meth:`close`."""
 
@@ -415,6 +431,7 @@ class IedClient:
             if owner:
                 val = decode(owner)
                 v.owner = val if isinstance(val, bytes) else None
+            v.owner_address = owner_address(v.owner)
             return v
         finally:
             if rcb:

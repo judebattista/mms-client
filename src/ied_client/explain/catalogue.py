@@ -89,6 +89,7 @@ REQUIRED_TOOL_CODES: tuple[str, ...] = (
     "write-readback-mismatch",
     "status-only-control",
     "not-probeable-direct-control",
+    "not-probeable-select-without-origin",
     "rcb-no-free-instance",
     "rcb-owned-by-other-client",
     "takeover-requires-expert",

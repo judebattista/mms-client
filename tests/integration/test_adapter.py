@@ -198,6 +198,7 @@ def test_rcb_owner_reflects_bound_local_ip(sim):
         v = c.get_rcb(ref)
         assert v.resv is True
         assert v.owner is not None and v.owner[-4:] == bytes([127, 0, 0, 2])
+        assert v.owner_address == "127.0.0.2"
         c.set_rcb(ref, {"resv": False})
         assert sim.wait_event(lambda e: e.get("event") == "connect" and e["peer"].startswith("127.0.0.2"))
     finally:

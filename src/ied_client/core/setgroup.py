@@ -1,8 +1,8 @@
 """Setting groups (RW-7): the SGCB select-edit-confirm sequence.
 
-Editing a group: EditSG := n (the device copies group n into the SE values), write the SE values,
-CnfEdit := true (the device stores them in group n), EditSG := 0 (release). Only the active group
-is visible under FC=SG; snapshots therefore capture only the active group (VER-9).
+Editing a group: SelectEditSG(n) (the device copies group n into the SE values), write the SE values,
+ConfirmEditSGValues (the device stores them in group n), SelectEditSG(0) (release). Only the active
+group is visible under FC=SG; snapshots therefore capture only the active group (VER-9).
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Any
 from ied_client import codes
 from ied_client.codes import ErrorInfo
 from ied_client.protocol.errors import NotConnectedError, ServiceError
-from ied_client.protocol.types import AccessError, VarSpec, format_value, value_to_json
+from ied_client.protocol.types import VarSpec, format_value, value_to_json
 from ied_client.protocol.values import parse_text
 
 from .model import ControlBlockInfo
@@ -72,27 +72,15 @@ def show(session: Session, ld: str | None = None) -> list[SgcbState]:
             continue
         st = SgcbState(cb)
         try:
-            val = client.read(ObjectRef(cb.ld, cb.ln, ("SGCB",), "SP"), cb.spec)
-            if isinstance(val, dict):
-                st.values = val
-            elif isinstance(val, AccessError):
-                st.error = val.error
+            st.values = client.get_control_block(cb)
         except ServiceError as e:
             st.error = e.error
         out.append(st)
     return out
 
 
-def _field_spec(cb: ControlBlockInfo, name: str) -> VarSpec:
-    s = cb.spec.child(name)
-    if s is None:
-        raise PolicyError(codes.tool("sgcb-attribute-missing"), f"the SGCB of {cb.ld} has no {name}")
-    return s
-
-
-def _write_field(session: Session, cb: ControlBlockInfo, name: str, value: Any) -> None:
-    client = session.require_client()
-    client.write(ObjectRef(cb.ld, cb.ln, ("SGCB", name), "SP"), _field_spec(cb, name), value)
+def _select_edit(session: Session, cb: ControlBlockInfo, group: int) -> None:
+    session.require_client().select_edit_sg(cb, group)
 
 
 def activate(
@@ -112,7 +100,7 @@ def activate(
         )
     ref = f"{cb.ld}/{cb.ln}.SGCB.ActSG"
     try:
-        _write_field(session, cb, "ActSG", group)
+        session.require_client().select_active_sg(cb, group)
         ok, err = True, None
     except ServiceError as e:
         ok, err = False, e.error
@@ -193,13 +181,13 @@ def edit(
         CleanupAction(
             key,
             f"edit session of setting group {group} in {cb.ld} (discarded)",
-            lambda: _write_field(session, cb, "EditSG", 0),
+            lambda: _select_edit(session, cb, 0),
             "the device ends an edit session when the association ends or its SGCB ResvTms expires; "
             "unconfirmed edits are discarded",
         )
     )
     try:
-        _write_field(session, cb, "EditSG", group)
+        _select_edit(session, cb, group)
         befores = [client.read(r, s) for r, s, _ in parsed]
         if confirm:
             lines = [f"Edit setting group {group} of {cb.ld} on {session.device_name}:"]
@@ -217,19 +205,19 @@ def edit(
             res.items.append(item)
         if res.error is not None:
             res.message = "a value was refused; the edit is discarded (not confirmed)"
-            _write_field(session, cb, "EditSG", 0)
+            _select_edit(session, cb, 0)
             session.drop_cleanup(key)
             return _log_edit(session, res, log_extra)
-        _write_field(session, cb, "CnfEdit", True)
+        client.confirm_edit_sg_values(cb)
         res.confirmed = True
         # verify: re-select the group and read the SE values back
-        _write_field(session, cb, "EditSG", group)
+        _select_edit(session, cb, group)
         for item, (r, s, v) in zip(res.items, parsed, strict=True):
             after = client.read(r, s)
             item["after"] = value_to_json(after)
             item["applied"] = values_equal(after, v)
         res.verified = all(i.get("applied") for i in res.items)
-        _write_field(session, cb, "EditSG", 0)
+        _select_edit(session, cb, 0)
         session.drop_cleanup(key)
         if not res.verified:
             res.error = codes.tool("write-readback-mismatch")
@@ -248,12 +236,12 @@ def edit(
 
 
 def _end_edit(session: Session, cb: ControlBlockInfo, key: str) -> None:
-    """Release the SGCB edit session (EditSG := 0). If that fails, the registered cleanup tries again at the
+    """Release the SGCB edit session (SelectEditSG(0)). If that fails, the registered cleanup tries again at the
     end of the session and reports what lingers."""
     if not any(a.key == key for a in session.cleanups):
         return
     try:
-        _write_field(session, cb, "EditSG", 0)
+        _select_edit(session, cb, 0)
     except (ServiceError, NotConnectedError):
         return
     session.drop_cleanup(key)

@@ -79,9 +79,10 @@ Practical consequences for anyone extending `adapter/client.py`:
 6. A dataset member that lives in another LD, on an LD that has an `ldName`, crashes the
    libiec61850 1.6.1 **server** on GetDataSetDirectory. This is a server-side bug you'll hit if
    you write SCL for the simulator; the shipped fixtures avoid it deliberately.
-7. `authority-probe` cannot test orCat on `sbo-with-normal-security` objects — libiec61850's
-   SBO-normal select carries no origin at the protocol level. This is the concrete instance of
-   PROTO-6's "declare what it can't support"; the tool says so rather than silently skipping it.
+7. `authority-probe` cannot test orCat on `sbo-with-normal-security` objects — IEC 61850-8-1 maps
+   that select to a read of SBO, which carries no origin. This is the concrete instance of PROTO-6's
+   "declare what it can't support": the module sets `select_carries_origin = False`, and the client
+   lists those objects as not probeable (ORG-5) instead of sending selects whose result means nothing.
 
 ## 3. Association: `--as` / `--bind`, and PROTO-1's connection parameters
 
@@ -159,6 +160,15 @@ RCBs, like controls, use libiec61850's IEC 61850 client services rather than raw
 except where the adapter's ctypes layer bypasses the high-level wrapper (§2, `RCB_ELEMENT_*`
 bitmask bug).
 
+`Owner` is an octet string in which IEC 61850-8-1 (and libiec61850) put the client's IP address: IPv4
+in the last 4 octets, IPv6 in the last 16. The module decodes it into `RcbValues.owner_address`; the
+client only ever compares and shows the decoded address (RPT-1), and the raw octets as hex.
+
+The SGCB and the other non-report control blocks (LCB, GoCB, SVCB) are structured variables in 8-1
+(`LLN0$SP$SGCB`, `LLN0$LG$<name>`, …). The module reads them whole for `get_control_block` and maps
+SelectActiveSG / SelectEditSG / ConfirmEditSGValues to writes of `ActSG`, `EditSG` and `CnfEdit`
+(PROTO-7, RW-7).
+
 ## 10. Explanation catalogue: MMS instantiation of EXP-7
 
 | ID | Requirement |
@@ -198,7 +208,8 @@ These are established findings (`docs/spikes.md`), not open questions:
   libiec61850/pyiec61850-ng combination.
 - libiec61850 1.6.1's **server** implementation crashes on `GetDataSetDirectory` for a dataset
   member that lives in another LD when that LD has an `ldName` set.
-- `authority-probe` cannot report orCat results for `sbo-with-normal-security` objects.
+- `authority-probe` cannot report orCat results for `sbo-with-normal-security` objects (listed as
+  not probeable; `select_carries_origin = False`).
 - Everything below was validated **against the simulated IED only** — no real vendor IED was
   available during Phase 0. Anything tagged RSK-6 needs re-validation per real model, which is
   exactly what the quirks file (§10) is for.

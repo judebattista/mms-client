@@ -407,7 +407,7 @@ class SimServer:
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
-    ap = argparse.ArgumentParser(prog="python -m tests.sim", description="Simulated IED for mms-client tests")
+    ap = argparse.ArgumentParser(prog="python -m tests.sim", description="Simulated IED for ied-client tests")
     src = ap.add_mutually_exclusive_group(required=True)
     src.add_argument("--config", help="libiec61850 model config file")
     src.add_argument("--scl", help="SCL file (CID/ICD/SCD)")

@@ -1,11 +1,15 @@
-"""Entry point: ``mms-client [options] <command> <device> [args]`` or ``mms-client shell <device>``."""
+"""Entry point: ``ied-client [options] <command> <device> [args]`` or ``ied-client shell <device>``.
+
+The old command name ``mms-client`` runs the same entry point (with a note on a terminal).
+"""
 
 from __future__ import annotations
 
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
-from ied_client import TOOL_NAME, __version__
+from ied_client import LEGACY_TOOL_NAME, TOOL_NAME, __version__
 from ied_client.protocol import registry as protocols
 
 from . import registry, runner
@@ -73,6 +77,8 @@ def version_text() -> str:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
+    if argv is None and Path(sys.argv[0]).name == LEGACY_TOOL_NAME and sys.stderr.isatty():
+        print(f"note: {LEGACY_TOOL_NAME} is now called {TOOL_NAME}; the old name still works for now.", file=sys.stderr)
     try:
         return _main(args)
     except KeyboardInterrupt:

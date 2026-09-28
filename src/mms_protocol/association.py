@@ -2,7 +2,8 @@
 
 This is where IEC 61850 references become MMS names: data ``LD/LN.DO.DA [FC]`` is read as the
 variable ``LN$FC$DO$DA`` of domain ``LD``, datasets are named variable lists, logical nodes are the
-domain's variables without ``$``.
+domain's variables without ``$``, and an LN's type is grouped by FC (IEC 61850-8-1), which
+:func:`ln_model` turns back into data objects and control blocks.
 """
 
 from __future__ import annotations
@@ -10,12 +11,17 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import IO, Any
 
+from ied_client import codes
 from ied_client.codes import ErrorInfo
 from ied_client.core.refs import ObjectRef, RefError
+from ied_client.protocol.errors import ServiceError
 from ied_client.protocol.types import (
+    AccessError,
+    ControlBlockInfo,
     DataSetMember,
     DatasetRef,
     FileEntry,
+    LogicalNodeModel,
     RcbValues,
     Report,
     ServerIdentity,
@@ -25,6 +31,27 @@ from ied_client.protocol.types import (
 
 from .adapter import ControlObject, IedClient, VariableListEntry
 from .names import dataset_from_item, dataset_item, mms_item, parse_mms
+
+# FC branches of an LN variable whose components are control blocks, not data objects.
+CONTROL_BLOCK_FCS = frozenset({"RP", "BR", "GO", "MS", "US", "LG"})
+# Components of the SP branch (of LLN0) that are control blocks.
+SP_CONTROL_BLOCKS = frozenset({"SGCB"})
+
+
+def ln_model(ld: str, ln: str, spec: VarSpec) -> LogicalNodeModel:
+    """An LN variable's type (a structure of FC branches, each a structure of data objects or control
+    blocks) as the IEC view of the LN."""
+    out = LogicalNodeModel()
+    for fc_branch in spec.children:
+        fc = fc_branch.name or ""
+        for comp in fc_branch.children:
+            if comp.name is None:
+                continue
+            if fc in CONTROL_BLOCK_FCS or (fc == "SP" and comp.name in SP_CONTROL_BLOCKS):
+                out.add_control_block(ControlBlockInfo(ld, ln, comp.name, fc, comp))
+            else:
+                out.add_data(fc, comp)
+    return out
 
 
 def dataset_member(entry: VariableListEntry) -> DataSetMember:
@@ -81,8 +108,8 @@ class MmsAssociation:
     def logical_nodes(self, ld: str) -> list[str]:
         return [n for n in self.client.get_domain_variable_names(ld) if "$" not in n]
 
-    def logical_node_spec(self, ld: str, ln: str) -> VarSpec:
-        return self.client.get_variable_spec(ld, ln)
+    def logical_node(self, ld: str, ln: str) -> LogicalNodeModel:
+        return ln_model(ld, ln, self.client.get_variable_spec(ld, ln))
 
     def datasets(self, ld: str) -> list[DatasetRef]:
         return [dataset_from_item(ld, n) for n in self.client.get_dataset_names(ld)]
@@ -130,6 +157,31 @@ class MmsAssociation:
 
     def uninstall_report_handler(self, reference: str) -> None:
         self.client.uninstall_report_handler(reference)
+
+    # -- other control blocks: over MMS they are structured variables (``LLN0$SP$SGCB``, ``LLN0$LG$lcb``)
+    def get_control_block(self, cb: ControlBlockInfo) -> dict[str, Value]:
+        val = self.client.read(cb.ld, mms_item(ObjectRef(cb.ld, cb.ln, (cb.name,), cb.fc)), cb.spec)
+        if isinstance(val, AccessError):
+            raise ServiceError("get-control-block", cb.reference, val.error)
+        return val if isinstance(val, dict) else {}
+
+    def _write_cb(self, service: str, cb: ControlBlockInfo, attribute: str, value: Value) -> None:
+        spec = cb.spec.child(attribute)
+        if spec is None:
+            raise ServiceError(
+                service, cb.reference, codes.tool("sgcb-attribute-missing"), f"the {cb.kind} has no {attribute}"
+            )
+        self.client.write(cb.ld, mms_item(ObjectRef(cb.ld, cb.ln, (cb.name, attribute), cb.fc)), spec, value)
+
+    # -- setting groups: writes of the SGCB's ActSG, EditSG and CnfEdit (IEC 61850-8-1)
+    def select_active_sg(self, cb: ControlBlockInfo, group: int) -> None:
+        self._write_cb("select-active-sg", cb, "ActSG", group)
+
+    def select_edit_sg(self, cb: ControlBlockInfo, group: int) -> None:
+        self._write_cb("select-edit-sg", cb, "EditSG", group)
+
+    def confirm_edit_sg_values(self, cb: ControlBlockInfo) -> None:
+        self._write_cb("confirm-edit-sg-values", cb, "CnfEdit", True)
 
     # -- files
     def file_directory(self, directory: str = "") -> list[FileEntry]:

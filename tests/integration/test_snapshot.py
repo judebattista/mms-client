@@ -43,11 +43,11 @@ def test_capture_layers_and_stable_file(sim, tmp_path):
     assert snap.structure["datasets"][f"{LD}/LLN0$Events"][0] == f"{LD}/GGIO1$ST$SPCSO1$stVal"
     assert snap.structure["model"][f"{LD}/GGIO1.AnIn1.mag.f[MX]"] == "float(32)"
     md = snap.metadata
-    assert md["edition"]["confidence"] == "inferred" and md["tool"]["name"] == "mms-client"
+    assert md["edition"]["confidence"] == "inferred" and md["tool"]["name"] == "ied-client"
     assert md["experiment"] == "unit" and md["active_setting_groups"] == {LD: 1}
     p = snap.save(tmp_path / "s.json")
     text = p.read_text()
-    assert json.loads(text)["kind"] == "mms-client-snapshot"
+    assert json.loads(text)["kind"] == "ied-client-snapshot"
     assert text == Snapshot.load(p).dumps()  # stable round trip (VER-13)
 
 

@@ -1,6 +1,7 @@
-# mms-client
+# ied-client
 
-An IEC 61850 MMS client for the IED test rack. It lets an operator:
+An IEC 61850 client for the IED test rack. It talks to devices through a pluggable protocol module;
+the one that exists is MMS (IEC 61850-8-1). It lets an operator:
 
 1. verify that the MMS server of an IED is **configured** correctly (against an SCD, a CID, a snapshot,
    or on its own);
@@ -15,13 +16,17 @@ The specification is in two parts, indexed by [SPEC.md](SPEC.md): the protocol-i
 [docs/safety-and-scope.md](docs/safety-and-scope.md) first: it explains the modes, the confirmations,
 and what the tool cannot see (GOOSE and Sampled Values are not MMS).
 
+The tool was called `mms-client` until 2026-09. During the transition the old command, the
+`MMS_CLIENT_*` environment variables, session logs under `~/.local/state/mms-client/` and snapshots
+written by `mms-client` all still work.
+
 ## Install (Ubuntu LTS or Kali)
 
 ```sh
 curl -LsSf https://astral.sh/uv/install.sh | sh     # once
 git clone <this repo> && cd mms-client
 uv sync                                            # CPython 3.12 + pinned pyiec61850-ng, never the system Python
-uv run mms-client --help
+uv run ied-client --help
 ```
 
 The Python version is pinned (`.python-version`); uv downloads it if needed (PLT-2).
@@ -30,15 +35,15 @@ The Python version is pinned (`.python-version`); uv downloads it if needed (PLT
 
 ```sh
 # an inventory describes the rack for one experiment (see "Inventory" below)
-export MMS_CLIENT_INVENTORY=experiments/feeder-trip.yaml
+export IED_CLIENT_INVENTORY=experiments/feeder-trip.yaml
 
-uv run mms-client diagnose relay-F12                  # layered connectivity diagnosis with a verdict
-uv run mms-client shell relay-F12                     # interactive shell on one association
-uv run mms-client read relay-F12 PROT/PTOC1.Str.general --json
-uv run mms-client check relay-F12 --reference scd/rack.scd
-uv run mms-client snapshot relay-F12 --out snapshots/relay-F12.json
-uv run mms-client diff relay-F12 snapshots/relay-F12.json
-uv run mms-client explain object-access-denied
+uv run ied-client diagnose relay-F12                  # layered connectivity diagnosis with a verdict
+uv run ied-client shell relay-F12                     # interactive shell on one association
+uv run ied-client read relay-F12 PROT/PTOC1.Str.general --json
+uv run ied-client check relay-F12 --reference scd/rack.scd
+uv run ied-client snapshot relay-F12 --out snapshots/relay-F12.json
+uv run ied-client diff relay-F12 snapshots/relay-F12.json
+uv run ied-client explain object-access-denied
 ```
 
 In the shell the model is navigable like a filesystem (`ls`, `cd /CTRL/CSWI1`, `tree`, `describe
@@ -49,7 +54,7 @@ Pos`), references tab-complete, and the prompt shows the mode, the device, the l
 [std] relay-F12:/CTRL/CSWI1 [orCat=remote]> operate Pos close
 ```
 
-Every command is also available one-shot (`mms-client <command> <device> …`), and every command can
+Every command is also available one-shot (`ied-client <command> <device> …`), and every command can
 print versioned JSON (`--json`). Friendly text is always accompanied by the exact object reference, FC
 and raw error code; `--terse` drops the hints.
 
@@ -84,16 +89,16 @@ clients:
   - {name: sm1-f12, client: sm1, server: relay-F12, source_ip: 10.0.0.5, rcbs: [CTRL/LLN0.BR.brcbA01]}
 ```
 
-`mms-client inventory from-scd rack.scd` drafts one from an SCD; `discover 10.0.0.0/24` drafts one from
+`ied-client inventory from-scd rack.scd` drafts one from an SCD; `discover 10.0.0.0/24` drafts one from
 the network. `--as sm1` makes the tool behave like that client (its source IP, its RCBs); the tool
 checks that the address exists on this machine and prints the exact `ip addr add` command if not.
 A device may name its protocol module (`protocol: mms`, the default; `--protocol` for a bare IP);
-`mms-client --version` lists the modules installed.
+`ied-client --version` lists the modules installed.
 
 ## Session log, restore, incidents
 
-Each session writes a JSONL log (default `~/.local/state/mms-client/sessions/`, override with
-`--log-dir` or `MMS_CLIENT_LOG_DIR`). `restore` writes back every value written in the session, newest
+Each session writes a JSONL log (default `~/.local/state/ied-client/sessions/`, override with
+`--log-dir` or `IED_CLIENT_LOG_DIR`). `restore` writes back every value written in the session, newest
 first, after confirmation — controls are never replayed (one-shot: `restore <device> --last` or
 `--from LOG`). `export --incident FILE` saves a
 self-contained failure record (device, inventory, identity, last diagnose/check results, log

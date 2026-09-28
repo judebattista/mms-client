@@ -191,7 +191,7 @@ def to_envelope(ctx: CliContext, cmd_name: str, result: CommandResult) -> dict[s
 
 # ---------------------------------------------------------------------------------- one-shot
 def run_oneshot(ctx: CliContext, tokens: list[str]) -> int:
-    """``mms-client [globals] <command> [<device>] [args]`` (global options already removed)."""
+    """``ied-client [globals] <command> [<device>] [args]`` (global options already removed)."""
     try:
         cmd, rest = lookup(tokens, in_shell=False)
         args = parse(cmd, rest, oneshot=True)

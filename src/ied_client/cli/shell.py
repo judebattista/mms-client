@@ -6,11 +6,11 @@ strings (a script on stdin, or a test), so it can run without a TTY.
 
 from __future__ import annotations
 
-import os
+import shutil
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 
-from ied_client import TOOL_NAME, codes
+from ied_client import LEGACY_TOOL_NAME, TOOL_NAME, codes, state_dir
 from ied_client.core.safety import Mode
 from ied_client.protocol import registry as protocols
 
@@ -35,8 +35,15 @@ def protocol_notes() -> list[str]:
 
 
 def history_path() -> Path:
-    state = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    return Path(state) / TOOL_NAME / "history"
+    path = state_dir() / "history"
+    old = state_dir(LEGACY_TOOL_NAME) / "history"
+    if not path.exists() and old.is_file():  # carry the shell history over from the tool's old name
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(old, path)
+        except OSError:
+            pass
+    return path
 
 
 def or_cat_label(value: int) -> str:

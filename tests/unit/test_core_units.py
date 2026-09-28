@@ -9,7 +9,7 @@ import yaml
 
 from ied_client import codes
 from ied_client.core.identity import Edition, edition_from_ldns
-from ied_client.core.model import DeviceModel, LogicalDeviceInfo, build_ln
+from ied_client.core.model import DeviceModel, LogicalDeviceInfo, LogicalNodeInfo
 from ied_client.core.refs import ObjectRef, RefError, parse_ref, parse_shell_path
 from ied_client.core.results import Category, CheckReport, CheckResult, Status, envelope
 from ied_client.core.safety import (
@@ -20,16 +20,27 @@ from ied_client.core.safety import (
     SafetyProfile,
     Scripted,
 )
-from ied_client.core.session import owner_ip, resolve_target
+from ied_client.core.session import resolve_target
 from ied_client.core.sessionlog import SessionLog, read_log, restorable_writes
 from ied_client.inventory import InventoryError, parse_inventory
 from ied_client.protocol.errors import EncodeError
-from ied_client.protocol.types import BitString, UtcTime, ValueKind, VarSpec, value_from_json, value_to_json
+from ied_client.protocol.types import (
+    BitString,
+    ControlBlockInfo,
+    LogicalNodeModel,
+    UtcTime,
+    ValueKind,
+    VarSpec,
+    value_from_json,
+    value_to_json,
+)
 from ied_client.protocol.values import parse_text
 from ied_client.verify.diff import IgnoreRules, diff_snapshots
 from ied_client.verify.snapshot import Snapshot
 from mms_protocol import codes as mms_codes
+from mms_protocol.adapter.client import owner_address
 from mms_protocol.adapter.codec import decode, encode
+from mms_protocol.association import ln_model
 from mms_protocol.names import MmsNaming, mms_item, parse_mms
 
 
@@ -112,17 +123,13 @@ def test_bitstring_int_views():
 
 # ------------------------------------------------------------------------- model
 def _model() -> DeviceModel:
-    ln_spec = VarSpec(
-        ValueKind.STRUCTURE,
-        "CSWI1",
-        children=(
-            VarSpec(ValueKind.STRUCTURE, "ST", children=(VarSpec(ValueKind.STRUCTURE, "Pos", children=(VarSpec(ValueKind.BIT_STRING, "stVal", 2),)),)),
-            VarSpec(ValueKind.STRUCTURE, "CF", children=(VarSpec(ValueKind.STRUCTURE, "Pos", children=(VarSpec(ValueKind.INTEGER, "ctlModel", 8),)),)),
-            VarSpec(ValueKind.STRUCTURE, "BR", children=(VarSpec(ValueKind.STRUCTURE, "brcb01", children=(VarSpec(ValueKind.VISIBLE_STRING, "RptID", 65),)),)),
-        ),
-    )
+    lnm = LogicalNodeModel()
+    lnm.add_data("ST", VarSpec(ValueKind.STRUCTURE, "Pos", children=(VarSpec(ValueKind.BIT_STRING, "stVal", 2),)))
+    lnm.add_data("CF", VarSpec(ValueKind.STRUCTURE, "Pos", children=(VarSpec(ValueKind.INTEGER, "ctlModel", 8),)))
+    rcb = VarSpec(ValueKind.STRUCTURE, "brcb01", children=(VarSpec(ValueKind.VISIBLE_STRING, "RptID", 65),))
+    lnm.add_control_block(ControlBlockInfo("CTRL", "CSWI1", "brcb01", "BR", rcb))
     m = DeviceModel()
-    m.lds["CTRL"] = LogicalDeviceInfo("CTRL", {"CSWI1": build_ln("CTRL", "CSWI1", ln_spec)})
+    m.lds["CTRL"] = LogicalDeviceInfo("CTRL", {"CSWI1": LogicalNodeInfo.from_model("CTRL", "CSWI1", lnm)})
     return m
 
 
@@ -136,6 +143,28 @@ def test_model_merge_and_resolve():
     assert m.children(("CTRL", "CSWI1")) == [("Pos", "do")]
     again = DeviceModel.from_json(json.loads(json.dumps(m.to_json())))
     assert again.resolve_fc(ObjectRef("CTRL", "CSWI1", ("Pos", "stVal")))[1].type_name() == "bit-string(2)"
+    assert [cb.reference for cb in again.rcbs()] == ["CTRL/CSWI1.BR.brcb01"]
+    assert again.lds["CTRL"].lns["CSWI1"].fcs == ["ST", "CF", "BR"]
+
+
+def test_mms_ln_model_splits_fc_branches():
+    """IEC 61850-8-1 groups an LN's type by FC; the MMS module turns it into data objects and control blocks."""
+
+    def s(name, *children):
+        return VarSpec(ValueKind.STRUCTURE, name, len(children), tuple(children))
+
+    sgcb = s("SGCB", VarSpec(ValueKind.UNSIGNED, "ActSG", 8))
+    spec = s(
+        "LLN0",
+        s("ST", s("Mod", VarSpec(ValueKind.INTEGER, "stVal", 8))),
+        s("SP", s("Setp", VarSpec(ValueKind.INTEGER, "setVal", 32)), sgcb),
+        s("BR", s("brcb01", VarSpec(ValueKind.VISIBLE_STRING, "RptID", 65))),
+        s("CF", s("Mod", VarSpec(ValueKind.INTEGER, "ctlModel", 8))),
+    )
+    m = ln_model("CTRL", "LLN0", spec)
+    assert set(m.data) == {"Mod", "Setp"} and m.data["Mod"].fcs == ["ST", "CF"]
+    assert {n: cb.kind for n, cb in m.control_blocks.items()} == {"SGCB": "SGCB", "brcb01": "BRCB"}
+    assert m.control_blocks["SGCB"].reference == "CTRL/LLN0.SP.SGCB"
 
 
 # ------------------------------------------------------------------------- identity
@@ -204,9 +233,9 @@ def test_inventory_rejects(bad):
         parse_inventory(yaml.safe_load(bad))
 
 
-def test_owner_ip():
-    assert owner_ip(bytes([0] * 12 + [10, 0, 0, 5])) == "10.0.0.5"
-    assert owner_ip(bytes(4)) is None and owner_ip(None) is None
+def test_owner_address():
+    assert owner_address(bytes([0] * 12 + [10, 0, 0, 5])) == "10.0.0.5"
+    assert owner_address(bytes(4)) is None and owner_address(None) is None
 
 
 # ------------------------------------------------------------------------- log / restore planning
@@ -265,7 +294,8 @@ class _FakeRcbClient:
         from ied_client.protocol.types import RcbValues
 
         owner = bytes([10, 0, 0, 9]) if self.resv_tms else b""
-        return RcbValues(ref, True, rpt_ena=False, resv_tms=self.resv_tms, owner=owner)
+        return RcbValues(ref, True, rpt_ena=False, resv_tms=self.resv_tms, owner=owner,
+                          owner_address=owner_address(owner))
 
     def set_rcb(self, ref, changes, single_request=True):
         from ied_client.protocol.errors import ServiceError
@@ -278,7 +308,6 @@ class _FakeRcbClient:
 
 
 def _brcb_session(client, *, before_resv_tms=0):
-    from ied_client.core.model import ControlBlockInfo
     from ied_client.core.reports import _brcb_reservation_cleanup
     from ied_client.core.session import Session, Target
     from ied_client.protocol.types import RcbValues
@@ -321,7 +350,7 @@ def test_brcb_reserved_by_configuration_is_not_released():
 def test_brcb_reservation_held_by_another_client_is_left_alone():
     client = _FakeRcbClient()
     client.get_rcb = lambda ref: __import__("ied_client.protocol.types", fromlist=["RcbValues"]).RcbValues(  # type: ignore[method-assign]
-        ref, True, rpt_ena=False, resv_tms=30, owner=bytes([10, 0, 0, 5]))
+        ref, True, rpt_ena=False, resv_tms=30, owner=bytes([10, 0, 0, 5]), owner_address="10.0.0.5")
     notes = _brcb_session(client).run_cleanups()
     assert client.writes == []
     assert notes == ["left the reservation of CTRL/LLN0.BR.brcbA01 alone: it is held by 10.0.0.5, not by this tool"]

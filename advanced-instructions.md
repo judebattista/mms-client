@@ -1,4 +1,4 @@
-# mms-client — Advanced Instructions
+# ied-client — Advanced Instructions
 
 This is the reference for someone already comfortable with IEC 61850, MMS, and the CLI basics
 (if you need those first, see [basic-instructions.md](basic-instructions.md)). It covers what
@@ -108,9 +108,9 @@ Practical consequences if you're extending `adapter/client.py`:
 6. A dataset member that lives in another LD, on an LD that has an `ldName`, crashes the
    libiec61850 1.6.1 **server** on GetDataSetDirectory. This is a server-side bug you'll hit if
    you write SCL for the simulator; the shipped fixtures avoid it deliberately.
-7. `authority-probe` cannot test orCat on `sbo-with-normal-security` objects — libiec61850's
-   SBO-normal select carries no origin at the protocol level. The tool says so rather than
-   silently skipping it; don't try to "fix" this without changing the wire protocol.
+7. `authority-probe` cannot test orCat on `sbo-with-normal-security` objects — over MMS
+   (IEC 61850-8-1) that select is a read of SBO and carries no origin. The tool lists those objects as
+   not probeable and sends them nothing; don't try to "fix" this without changing the wire protocol.
 
 ---
 
@@ -134,8 +134,8 @@ add them to the interface once (`sudo ip addr add 10.0.0.5/24 dev eth0`) rather 
 per session.
 
 ```sh
-mms-client diagnose relay-F12 --as station-manager-1     # both source IP and RCBs come from the inventory
-mms-client read relay-F12 CTRL/CSWI1.Pos.stVal --bind 10.0.0.9   # just a specific source IP
+ied-client diagnose relay-F12 --as station-manager-1     # both source IP and RCBs come from the inventory
+ied-client read relay-F12 CTRL/CSWI1.Pos.stVal --bind 10.0.0.9   # just a specific source IP
 ```
 
 `--as` and `--bind` are session-scoped options — they must be given at `connect` time (or as a
@@ -154,7 +154,7 @@ confirmation behaviour). The envelope is stable across commands:
 {
   "schema_version": "1.0",
   "tool": {
-    "name": "mms-client",
+    "name": "ied-client",
     "version": "0.1.0",
     "pyiec61850_ng": "1.6.1.10",
     "libiec61850": "1.6.1"
@@ -444,8 +444,8 @@ These are established findings (`docs/spikes.md`), not open questions:
   member that lives in another LD when that LD has an `ldName` set. This affects the simulator
   (avoided deliberately in the shipped fixtures) and will affect any real IED built on the same
   libiec61850 server version if its SCD does this.
-- `authority-probe` cannot report orCat results for `sbo-with-normal-security` objects — the
-  underlying SBO-normal Select carries no origin field at the protocol level in this stack.
+- `authority-probe` cannot report orCat results for `sbo-with-normal-security` objects — over MMS
+  the SBO-normal Select carries no origin field; those objects are listed as not probeable.
 - Everything under RSK-1–RSK-6 was validated **against the simulated IED only** — no real
   vendor IED was available during Phase 0. Anything RSK-6-tagged ("pending real devices",
   vendor variation in authority checks/RCB reservation/ResvTms/setting groups/identity
@@ -491,8 +491,8 @@ against a device that behaves like a real IED without needing rack access:
 
 ```sh
 uv run python -m tests.sim --scl tests/fixtures/scl/bcu_ed2.cid --port 10102
-export MMS_CLIENT_INVENTORY=/path/to/a/minimal-inventory.yaml   # point a device at 127.0.0.1:10102
-uv run mms-client diagnose <that-device>
+export IED_CLIENT_INVENTORY=/path/to/a/minimal-inventory.yaml   # point a device at 127.0.0.1:10102
+uv run ied-client diagnose <that-device>
 ```
 
 ### Architecture-test-driven extension

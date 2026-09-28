@@ -23,7 +23,7 @@ from ied_client.protocol.types import RcbValues, Report, VarSpec, format_value, 
 from .model import ControlBlockInfo
 from .refs import ObjectRef, RefError
 from .safety import PolicyError
-from .session import CleanupAction, Session, owner_ip
+from .session import CleanupAction, Session
 
 
 def trg_ops_names(v: int | None) -> list[str]:
@@ -135,8 +135,8 @@ def list_rcbs(session: Session, ln_filter: str | None = None) -> list[RcbStatus]
         st = RcbStatus(cb)
         try:
             st.values = client.get_rcb(cb.reference)
-            st.owner_ip = owner_ip(st.values.owner)
-            st.owner_name = session.owner_name(st.values.owner)
+            st.owner_ip = st.values.owner_address
+            st.owner_name = session.owner_name(st.values.owner_address)
         except ServiceError as e:
             st.error = e.error
         st.assigned_to = assignments(session, cb)
@@ -409,8 +409,8 @@ def subscribe(
         st = RcbStatus(cb)
         try:
             st.values = client.get_rcb(cb.reference)
-            st.owner_ip = owner_ip(st.values.owner)
-            st.owner_name = session.owner_name(st.values.owner)
+            st.owner_ip = st.values.owner_address
+            st.owner_name = session.owner_name(st.values.owner_address)
         except ServiceError as e:
             st.error = e.error
         st.assigned_to = assignments(session, cb)
@@ -542,8 +542,8 @@ def _brcb_reservation_cleanup(session: Session, cb: ControlBlockInfo, values: Rc
             return f"left the reservation of {ref} as the tool found it (ResvTms=-1: reserved by configuration)"
         client = session.require_client()
         v = client.get_rcb(ref)
-        if v.resv_tms not in (None, 0) and not session.is_own_owner(v.owner):
-            holder = session.owner_name(v.owner) or owner_ip(v.owner) or "another client"
+        if v.resv_tms not in (None, 0) and not session.is_own_owner(v.owner_address):
+            holder = session.owner_name(v.owner_address) or v.owner_address or "another client"
             return f"left the reservation of {ref} alone: it is held by {holder}, not by this tool"
         if v.resv_tms not in (None, 0):
             client.set_rcb(ref, {"resv_tms": 0})
@@ -551,7 +551,7 @@ def _brcb_reservation_cleanup(session: Session, cb: ControlBlockInfo, values: Rc
 
     def verify() -> str | None:
         v = session.require_client().get_rcb(ref)
-        if v.resv_tms in (None, 0) or not session.is_own_owner(v.owner):
+        if v.resv_tms in (None, 0) or not session.is_own_owner(v.owner_address):
             return None
         return _lingering_text(ref, v.resv_tms, assigned)
 

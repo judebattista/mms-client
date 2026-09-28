@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import argparse
-import os
 from dataclasses import dataclass, fields
 
-from ied_client import ENV_PREFIX, TOOL_NAME
+from ied_client import ENV_PREFIX, TOOL_NAME, env
 
 from .registry import CliArgumentParser
 
@@ -61,7 +60,7 @@ class Options:
             if v is not None:
                 setattr(o, f.name, v)
         if o.inventory is None:
-            o.inventory = os.environ.get(f"{ENV_PREFIX}_INVENTORY") or None
+            o.inventory = env("INVENTORY")
         return o
 
 

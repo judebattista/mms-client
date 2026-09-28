@@ -9,12 +9,12 @@ import threading
 from pathlib import Path
 from typing import IO, Any
 
-from ied_client import __version__
+from ied_client import __version__, env
 from ied_client.core.controls import parse_or_cat
 from ied_client.core.model import DeviceModel
 from ied_client.core.safety import Interaction, Mode, Policy, SafetyProfile
 from ied_client.core.session import Session, resolve_target
-from ied_client.core.sessionlog import SessionLog, default_log_dir
+from ied_client.core.sessionlog import SessionLog, default_log_dir, legacy_log_dir
 from ied_client.inventory import Inventory, load_inventory
 from ied_client.protocol.api import ProtocolModule
 from ied_client.protocol.errors import NotConnectedError
@@ -121,6 +121,14 @@ class CliContext:
     @property
     def log_dir(self) -> Path:
         return Path(self.options.log_dir) if self.options.log_dir else default_log_dir()
+
+    @property
+    def log_dirs(self) -> list[Path]:
+        """Where earlier session logs are looked for: the log directory and, when that is the default, the
+        default directory of the tool's old name, so that `restore --last` finds logs written before the rename."""
+        if self.options.log_dir or env("LOG_DIR"):
+            return [self.log_dir]
+        return [self.log_dir, legacy_log_dir()]
 
     # ------------------------------------------------------------------ protocol
     def protocol_module(self) -> ProtocolModule | None:

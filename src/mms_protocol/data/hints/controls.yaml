@@ -1,0 +1,27 @@
+# Controls over MMS: entries that replace the client's protocol-neutral ones (same id) with what
+# IEC 61850-8-1 does on the wire.
+# Format: see the header of ied_client/data/hints.yaml.
+
+version: 1
+entries:
+
+- id: tool.not-probeable-select-without-origin
+  keys: [tool:not-probeable-select-without-origin]
+  title: SBO-with-normal-security object not probeable
+  summary: >-
+    `authority-probe` tests authority by comparing what each orCat gets back from a select. Over MMS
+    the select of an sbo-with-normal-security object carries no orCat at all, so the device cannot be
+    reacting to the orCat sent and a per-orCat result would mean nothing.
+  details: |
+    IEC 61850-8-1 maps a select without a value (ctlModel=2, sbo-with-normal-security) to an MMS read
+    of the object's SBO attribute. A read has no parameter for orCat or orIdent, so whatever the device
+    accepts or refuses, it cannot be deciding by originator. The tool sends nothing to such an object
+    and lists it as not probeable rather than print a matrix that looks meaningful but is not. The
+    originator only reaches the device with the Operate that follows.
+  next_checks:
+    - "Test authority on an sbo-with-enhanced-security object at this IED instead (its SelectWithValue carries orCat)"
+    - "Use `origin` after a real client's control to see what it actually sent"
+    - "Take a packet capture of a real client's select and operate on this object to see what the device does with them"
+  related: [ctlmodel.sbo-with-normal-security, control.sbo, tool:not-probeable-direct-control]
+  hint: "Over MMS the select of an sbo-with-normal-security object is a read of SBO and carries no orCat, so `authority-probe` cannot test it"
+  certainty: fact

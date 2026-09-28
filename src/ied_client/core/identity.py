@@ -337,12 +337,11 @@ def _ed2_markers(model: DeviceModel) -> list[str]:
     """Attributes that only exist from Ed2 on (IDN-2 step 4)."""
     out: list[str] = []
     for cb in model.rcbs():
-        names = {c.name for c in cb.spec.children}
-        if cb.kind == "BRCB" and "ResvTms" in names:
+        if cb.kind == "BRCB" and "ResvTms" in cb.attribute_names:
             out.append(f"{cb.reference} has ResvTms (Ed2+)")
             break
     for cb in model.rcbs():
-        if "Owner" in {c.name for c in cb.spec.children}:
+        if "Owner" in cb.attribute_names:
             out.append(f"{cb.reference} has Owner (Ed2+)")
             break
     for ref, _node in model.iter_data_objects():

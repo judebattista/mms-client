@@ -361,22 +361,20 @@ class Session:
                 return None
         return self._own_address
 
-    def is_own_owner(self, owner: bytes | None) -> bool:
+    def is_own_owner(self, address: str | None) -> bool:
         """Is this RCB Owner this tool's own address? (Independent of inventory names: with ``--as`` the
         tool's address is also the neighbour's.)"""
-        ip = owner_ip(owner)
-        return ip is not None and ip == self.own_address()
+        return address is not None and address == self.own_address()
 
-    def owner_name(self, owner: bytes | None) -> str | None:
-        """Resolve an RCB Owner (usually the client's IP address) to an inventory name."""
-        ip = owner_ip(owner)
-        if ip is None:
+    def owner_name(self, address: str | None) -> str | None:
+        """Resolve an RCB Owner address (decoded by the protocol module) to an inventory name."""
+        if address is None:
             return None
         if self.inventory is not None:
-            name = self.inventory.name_for_ip(ip)
+            name = self.inventory.name_for_ip(address)
             if name:
                 return name
-        if ip == self.own_address():
+        if address == self.own_address():
             return "this tool"
         return None
 
@@ -386,18 +384,3 @@ class Session:
 
 def _raise_keyboard_interrupt(*_args: object) -> None:
     raise KeyboardInterrupt
-
-
-def owner_ip(owner: bytes | None) -> str | None:
-    """IEC 61850 Owner is an octet string; libiec61850 and most IEDs put the client's IPv4
-    address in the last four octets (IPv6 in 16)."""
-    if not owner or not any(owner):
-        return None
-    if len(owner) >= 16 and any(owner[:-4]):
-        import ipaddress
-
-        try:
-            return str(ipaddress.IPv6Address(bytes(owner[-16:])))
-        except ValueError:
-            return None
-    return ".".join(str(b) for b in owner[-4:])

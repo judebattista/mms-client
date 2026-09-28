@@ -26,15 +26,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ied_client import LEGACY_TOOL_NAME, TOOL_NAME
 from ied_client.core.identity import identify
 from ied_client.core.model import ControlBlockInfo, DeviceModel
 from ied_client.core.refs import ObjectRef
 from ied_client.core.results import tool_info
-from ied_client.core.session import Session, owner_ip
+from ied_client.core.session import Session
 from ied_client.protocol.errors import ServiceError
 from ied_client.protocol.types import AccessError, ValueKind, VarSpec, value_to_json
 
-SNAPSHOT_KIND = "mms-client-snapshot"
+SNAPSHOT_KIND = f"{TOOL_NAME}-snapshot"
+SNAPSHOT_KINDS = (SNAPSHOT_KIND, f"{LEGACY_TOOL_NAME}-snapshot")  # the old name's snapshots still load
 SNAPSHOT_VERSION = "1.0"
 CONFIG_FCS = ("CF", "SP", "DC", "EX", "SG")
 OPERATIONAL_DOS = ("Mod", "Beh", "Health", "Loc", "LocSta", "LocKey", "PhyHealth")
@@ -74,8 +76,8 @@ class Snapshot:
 
     @classmethod
     def from_json(cls, d: dict[str, Any]) -> Snapshot:
-        if d.get("kind") != SNAPSHOT_KIND:
-            raise ValueError("not an mms-client snapshot")
+        if d.get("kind") not in SNAPSHOT_KINDS:
+            raise ValueError(f"not an {TOOL_NAME} snapshot")
         major = str(d.get("schema_version", "0")).split(".")[0]
         if major != SNAPSHOT_VERSION.split(".")[0]:
             raise ValueError(f"unsupported snapshot schema_version {d.get('schema_version')}")
@@ -268,17 +270,14 @@ def _capture_cb(reader: _Reader, cb: ControlBlockInfo, snap: Snapshot, active_gr
             snap.operational[f"{key}.ResvTms"] = v.resv_tms
         else:
             snap.operational[f"{key}.Resv"] = v.resv
-        snap.operational[f"{key}.Owner"] = owner_ip(v.owner)
+        snap.operational[f"{key}.Owner"] = v.owner_address
     else:
-        fc = cb.fc
         try:
-            val = client.read(ObjectRef(cb.ld, cb.ln, (cb.name,), fc), cb.spec)
+            val = client.get_control_block(cb)
             reader.requests += 1
         except ServiceError as e:
-            val = AccessError(e.error)
-        if isinstance(val, AccessError):
-            struct["error"] = value_to_json(val)
-        elif isinstance(val, dict):
+            struct["error"] = value_to_json(AccessError(e.error))
+        else:
             for k, x in val.items():
                 if k not in VOLATILE_CB_ATTRS:
                     struct[k] = value_to_json(x)
