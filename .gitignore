@@ -9,3 +9,5 @@ build/
 # session logs and scratch output
 .mms-client/
 /sessions/
+*.swo
+*.swp
