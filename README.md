@@ -32,7 +32,7 @@ ied-client --version                               # ied-client 2.2.0 (package 2
 ```
 
 The package comes from the GitHub release of each `v*` tag, or from `packaging/build-deb.sh` on
-any Linux machine with internet access ([docs/packaging.md](docs/packaging.md)). Upgrades install
+any Linux machine with internet access ([build-instructions.md](build-instructions.md)). Upgrades install
 the same way; `sudo apt remove ied-client` removes it and leaves logs and local data alone.
 
 **Development checkout:**
@@ -153,6 +153,7 @@ uv run python -m tests.sim --scl tests/fixtures/scl/bcu_ed2.cid --port 10102   #
 * [docs/architecture.md](docs/architecture.md) — layers, the protocol-module contract, threading, why the
   adapter uses ctypes, how to add a protocol module.
 * [docs/spikes.md](docs/spikes.md) — Phase 0 results (RSK-1 … RSK-6).
+* [build-instructions.md](build-instructions.md) — step by step: build, check and release the offline `.deb`.
 * [docs/packaging.md](docs/packaging.md) — the offline `.deb`: what is in it, building, verifying, releasing.
 * [docs/field-data.md](docs/field-data.md) — local data layers, the field bundle, ingest and the ledger.
 * `src/ied_client/` — the protocol-independent client (CLI, core, verification, diagnosis, SCL).

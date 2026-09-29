@@ -56,6 +56,8 @@ protocols: mms: pyiec61850-ng 1.6.1.10, libiec61850 1.6.1
 
 ## Building
 
+Step by step, with prerequisites and troubleshooting: [build-instructions.md](../build-instructions.md).
+
 On any x86_64 Linux machine with `uv`, `git` and `dpkg-deb` (Ubuntu, Debian, Kali, WSL) and
 internet access, or a uv cache that already holds the pinned wheels and Python:
 

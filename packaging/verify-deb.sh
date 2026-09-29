@@ -9,7 +9,7 @@
 set -euo pipefail
 
 die() { echo "verify-deb: $*" >&2; exit 1; }
-[ $# -eq 2 ] || { sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+[ $# -eq 2 ] || { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0" >&2; exit 2; }
 DEB="$(readlink -f "$1")"
 IMAGE="$2"
 [ -f "$DEB" ] || die "no such file: $1"
