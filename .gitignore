@@ -3,11 +3,11 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .ruff_cache/
-dist/
+# Commenting to temporarily add the installer to the repo
+#dist/
 build/
 *.egg-info/
 # session logs and scratch output
 .mms-client/
 /sessions/
-*.swo
-*.swp
+*.sw[a-p]
