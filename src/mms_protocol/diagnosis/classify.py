@@ -431,7 +431,8 @@ def assess_association_limits(
             Finding(
                 codes.tool("known-association-limit").key,
                 "check",
-                f"the quirks file records for {quirks.describe_match()}: " + "; ".join(parts) + f" ({src})",
+                f"{'a local quirks file (not yet reviewed into the package)' if quirks.local else 'the quirks file'} "
+                f"records for {quirks.describe_match()}: " + "; ".join(parts) + f" ({src})",
                 [f"quirks entry {quirks.origin}"] if quirks.origin else [],
             )
         )

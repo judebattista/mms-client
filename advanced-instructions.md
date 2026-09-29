@@ -431,6 +431,36 @@ suggestion): `diagnose`, `authority-probe` in expert mode across all orCats, `rc
 `subscribe` (note `ResvTms`/`Owner` behaviour specifically), `setgroup show`/`edit`, `info`
 (identity sources and `ldNs` value) — then write the quirks entry from what you observed.
 
+### On an installed (offline) machine: local layers and the way back (§13.1, FLD-1 … FLD-6)
+
+An installed copy's data files live under `/opt/ied-client` (read-only, replaced by every
+upgrade), so an operator adds to the catalogue and quirks in **local layers** instead:
+`/etc/ied-client/` (machine-wide, written with `sudo … --system`) and `~/.config/ied-client/`
+(per user), each with `hints/*.yaml`, `quirks/<protocol>/*.yaml` and `incidents/`, in exactly the
+repo formats. `IED_CLIENT_LOCAL_DIRS=dir1:dir2` replaces both (the tests use it). Load order is
+package → machine → user; a local catalogue entry replaces a built-in one **by id** (so a
+reworded built-in entry is `local edit hints --from <id>`), a local quirk wins at equal
+specificity. Local hints render as `[local] …` and carry `source` in JSON; a finding based on a
+local quirk says "a local quirks file (not yet reviewed into the package)". A local file that
+fails to load is left out, never fatal (`local status` exits 1 with `tool:local-data-invalid`).
+
+| Command | Does |
+|---|---|
+| `local status` | layers, files, validity, and each entry's standing: local only / overrides a built-in entry / reviewed into this package / reviewed, not accepted (reason) |
+| `local edit hints\|quirks [--from ID] [--file NAME] [--system]` | `$VISUAL`/`$EDITOR` on a temp copy; validated before the atomic save; re-edit or discard on error |
+| `local add-quirk <device>` | `match` from the identity the device reports (exact strings; firmware exact or any), fields via prompts or `--set F=V`, evidence via `--save-incident` / `--incident FILE` / `--source TEXT` |
+| `local export [--out FILE]` | one JSON field bundle: files verbatim + sha256, cited incidents, entry fingerprints, provenance |
+| `local import FILE [--system]` | another laptop's bundle into this machine's layer, as `imported-<host>-<date>-*.yaml` |
+| `local prune [--system]` | removes local entries the installed package's ledger lists as reviewed |
+
+Back in the repository, `uv run python tools/ingest_field_data.py BUNDLE` shows what the bundle
+would change (add / change with a diff / duplicate / conflict / already reviewed), and `--apply`
+walks through it (accept, reject with a reason, skip). It edits the data files as text, so
+comments and formatting elsewhere in them survive, validates the whole catalogue and the quirks
+files before writing anything, and records every decision by content fingerprint in
+`src/ied_client/data/field-ledger.yaml` — that file ships in the package and is how `local
+status`/`local prune` on the laptop learn the outcome. Details: [docs/field-data.md](docs/field-data.md).
+
 ---
 
 ## 11. Known stack limitations worth knowing before you file a bug
@@ -460,9 +490,14 @@ These are established findings (`docs/spikes.md`), not open questions:
 uv run pytest                                        # unit + integration; simulated IED spawns automatically
 uv run pytest -m soak -s                              # RSK-5 memory soak (10k read/write cycles) — not run by default
 uv run pytest tests/unit/test_architecture.py         # the PLT-4 / ARC-1 / ARC-5 structural checks, fast, run these first on any adapter/CLI change
-uv run ruff check src tests
+uv run ruff check src tests tools packaging
 uv run python -m tests.sim --scl tests/fixtures/scl/bcu_ed2.cid --port 10102   # standalone simulator, see below
 ```
+
+Building the offline package (PLT-5): `packaging/build-deb.sh` (needs a clean tree; `--allow-dirty`
+for a test build) writes `dist/ied-client_<version>-1_amd64.deb`; `packaging/verify-deb.sh
+<deb> ubuntu:24.04` installs it in a container with networking off and runs this test suite
+against the installed copy. CI does both on every `v*` tag. See [docs/packaging.md](docs/packaging.md).
 
 `addopts = "-m 'not soak'"` in `pyproject.toml` means the soak test never runs by default —
 run it explicitly (`-m soak -s`) whenever you touch adapter memory handling (native object
@@ -492,7 +527,7 @@ against a device that behaves like a real IED without needing rack access:
 ```sh
 uv run python -m tests.sim --scl tests/fixtures/scl/bcu_ed2.cid --port 10102
 export IED_CLIENT_INVENTORY=/path/to/a/minimal-inventory.yaml   # point a device at 127.0.0.1:10102
-uv run ied-client diagnose <that-device>
+ied-client diagnose <that-device>
 ```
 
 ### Architecture-test-driven extension

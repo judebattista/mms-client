@@ -14,6 +14,7 @@ through the contract in `ied_client.protocol`.
         │                                                 setting groups, files, identity, log, restore
         │                         ied_client.scl          SCL parser (Ed1/Ed2/Ed2.1), expected model
         │                         ied_client.explain      hint catalogue (YAML data)
+        │                         ied_client.localdata    this machine's local layers, field bundles, ledger (FLD)
         │
   Protocol contract               ied_client.protocol     ProtocolModule / Association / Naming protocols,
         │                                                 shared value types, errors, registry
@@ -150,6 +151,34 @@ re-assessment and the edition compatibility check (IDN-8). `discover` (DIA-5) is
 Reads and writes use MMS-level services (`MmsConnection_readVariable/writeVariable`) so that the device's
 DataAccessError is reported exactly (CLI-7, RW-6). RCBs, controls and files use the IEC 61850 client
 services of libiec61850.
+
+## Local data layers (`ied_client.localdata`, FLD-1 … FLD-6)
+
+The built-in catalogue and quirks are package data; an installed copy also loads the machine's own
+files from `/etc/ied-client/` and `~/.config/ied-client/` (`IED_CLIENT_LOCAL_DIRS` overrides both).
+`explain.default_catalogue()` layers `localdata.catalogue_files()` after the built-in sources and, if one
+of them does not load, rebuilds without it and reports it through `explain.local_problems()`;
+`quirks.load_quirks_for(module)` does the same for `module.quirks_sources()` plus
+`localdata.quirks_files(module.name)` (the MMS module's `diagnosis/connection.py` calls it, so the
+module never needs to know where local files live). Entries from non-built-in files carry their source:
+`Hint.source` / `Explanation.source` (rendered as `[local]`), `QuirkInfo.local`. `localdata` never
+imports a protocol module; it gets the modules' built-in quirks through the registry.
+
+Files are edited as text, never re-dumped, so comments survive: `ied_client.yamledit` finds the items
+of a top-level YAML list with `yaml.compose` and splices whole lines (`remove`, `replace`, `append`).
+`local edit` / `local prune` use it on the laptop, and `tools/ingest_field_data.py` uses it on the
+repository's data files. An entry is identified across machines by `localdata.fingerprint()` (sha256
+of its canonical JSON); the ledger `ied_client/data/field-ledger.yaml` maps fingerprints to review
+decisions and ships with the package. The CLI side is `cli/commands/local.py`. See
+[field-data.md](field-data.md).
+
+## Offline package
+
+`packaging/build-deb.sh` installs the wheel and the hash-pinned requirements from `uv.lock` into a copy
+of the uv-managed (python-build-standalone) CPython under `/opt/ied-client/python`, precompiles it and
+wraps it in a `.deb`; `ied_client.buildinfo` reads the `BUILD-INFO.json` it writes next to the
+interpreter (`--version`). Nothing in the code depends on being packaged: the same code runs from the
+uv venv. See [packaging.md](packaging.md).
 
 ## Adding a protocol module
 

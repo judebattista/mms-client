@@ -1,0 +1,20 @@
+# Field-data ledger (IED-CLIENT-SPEC.md FLD-5, FLD-6).
+#
+# One row per local entry (quirk or explanation entry) that came back from a laptop in a field bundle
+# (`ied-client local export`) and was reviewed with `tools/ingest_field_data.py`. The row names the
+# entry by the fingerprint of its content as it was on the laptop, so that `ied-client local status`
+# and `local prune` on that laptop can tell, once this package is installed there, that the entry
+# has been dealt with: accepted (possibly reworded during review) or rejected, with the reason.
+#
+# tools/ingest_field_data.py maintains this file; edit it by hand only to correct a decision.
+# Rows:
+#   fingerprint: <16 hex digits>   ied_client.localdata.fingerprint() of the entry as exported
+#   kind:        hint | quirk
+#   ref:         the entry's id, or the quirk's "vendor / model / firmware"
+#   decision:    accepted | rejected
+#   reason:      why it was rejected, or how it was changed when accepted (optional)
+#   bundle:      the bundle file it came in (archived in field-data/bundles/)
+#   reviewed:    YYYY-MM-DD
+
+schema_version: 1
+reviewed:

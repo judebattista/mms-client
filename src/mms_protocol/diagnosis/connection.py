@@ -18,7 +18,7 @@ from ied_client.core.session import Session
 from ied_client.diagnosis.diagnose import DiagnosisReport, Finding, LayerOutcome, Verdict
 from ied_client.diagnosis.probe import ProbeResult
 from ied_client.protocol.errors import ConnectError
-from ied_client.quirks import QuirkInfo, load_quirks
+from ied_client.quirks import QuirkInfo, load_quirks_for
 
 from ..codes import MmsDomain
 from .classify import (
@@ -91,7 +91,7 @@ def quirks_for(session: Session) -> QuirkInfo | None:
         return None
     try:
         # resolve(): a firmware-specific entry must not hide model-wide limits
-        return load_quirks(sources=protocol.quirks_sources()).resolve(vendor, model, fw)
+        return load_quirks_for(protocol).resolve(vendor, model, fw)  # built-in + local (FLD-1)
     except Exception:
         return None
 

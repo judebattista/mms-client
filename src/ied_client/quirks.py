@@ -11,6 +11,11 @@ firmware). Patterns are exact strings or globs, compared case-insensitively afte
 spaces. The most specific matching entry wins: each exact field scores 2, each glob field 1 (a
 bare ``*`` scores 0); at equal score the entry loaded last wins, so layered files override the
 built-in one.
+
+:func:`load_quirks_for` is how a protocol module loads its quirks: its built-in files, then the
+local files of this machine for that module (:mod:`ied_client.localdata`, FLD-1). Entries from a
+local file are marked ``local``; a local file that does not load is left out and listed in
+``QuirkDB.problems`` (FLD-3).
 """
 
 from __future__ import annotations
@@ -19,13 +24,15 @@ import dataclasses
 import datetime as _dt
 import fnmatch
 import os
-import tempfile
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from . import localdata
+from .localdata import atomic_write
 
 SCHEMA_VERSION = 1
 MATCH_FIELDS = ("vendor", "model", "firmware")
@@ -92,6 +99,7 @@ class QuirkInfo:
     added: str | None = None
     extra: Mapping[str, Any] = field(default_factory=dict)
     origin: str = ""
+    local: bool = False  # from a local file of this machine, not the package (FLD-2)
 
     @property
     def specificity(self) -> int:
@@ -190,6 +198,7 @@ class QuirkDB:
 
     entries: list[QuirkInfo] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)
+    problems: list[str] = field(default_factory=list)  # local files left out, and why (FLD-3)
 
     def __len__(self) -> int:
         return len(self.entries)
@@ -219,17 +228,19 @@ class QuirkDB:
         best = found[0]
         filled: dict[str, Any] = {}
         origins = [best.origin]
+        local = best.local
         for k in KNOWN_FIELDS:
             if getattr(best, k) is None:
                 for e in found[1:]:
                     if getattr(e, k) is not None:
                         filled[k] = getattr(e, k)
+                        local = local or e.local
                         if e.origin not in origins:
                             origins.append(e.origin)
                         break
         if not filled:
             return best
-        return dataclasses.replace(best, origin=", ".join(origins), **filled)
+        return dataclasses.replace(best, origin=", ".join(origins), local=local, **filled)
 
     def add_file(self, path: str | os.PathLike[str]) -> None:
         p = Path(path)
@@ -288,17 +299,7 @@ class QuirkDB:
             ) from e
         if len(after) != len(existing) + 1 or after[-1].to_json() != info.to_json():
             raise QuirksError(f"{p}: the appended entry did not read back correctly; file left unchanged")
-        fd, tmp = tempfile.mkstemp(dir=p.parent if str(p.parent) else ".", prefix=".quirks-", suffix=".yaml")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(new_text)
-            os.replace(tmp, p)
-        except BaseException:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            raise
+        atomic_write(p, new_text)  # keeps the file's mode; a new file is 0644 (the machine layer is shared)
         return after[-1]
 
 
@@ -313,4 +314,19 @@ def load_quirks(
         db.sources.append(label)
     for p in extra_paths:
         db.add_file(p)
+    return db
+
+
+def load_quirks_for(module: Any) -> QuirkDB:
+    """A protocol module's quirks: its built-in files (``module.quirks_sources()``, PROTO-12), then
+    this machine's local files for it (``quirks/<module.name>/*.yaml`` in each local layer, FLD-1)."""
+    db = load_quirks(sources=module.quirks_sources())
+    for path in localdata.quirks_files(module.name):
+        try:
+            entries = _load_text(path.read_text(encoding="utf-8"), str(path))
+        except (OSError, UnicodeDecodeError, QuirksError) as e:
+            db.problems.append(f"{path}: left out: {e}")
+            continue
+        db.entries.extend(dataclasses.replace(e, local=True) for e in entries)
+        db.sources.append(str(path))
     return db

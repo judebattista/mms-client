@@ -13,8 +13,8 @@ Typical use::
 
 The catalogue data lives in ``ied_client/data/hints.yaml`` (format documented at its top),
 ``hints/*.yaml``, ``glossary.yaml`` and ``glossary/*.yaml``, plus each protocol module's own files
-(its error codes). Experiment-specific files can be layered on top with
-``Catalogue.load(extra_paths=[...])``.
+(its error codes). :func:`default_catalogue` layers the local files of this machine on top
+(:mod:`ied_client.localdata`, FLD-1); other files can be layered with ``Catalogue.load(extra_paths=[...])``.
 """
 
 from .catalogue import (
@@ -30,7 +30,9 @@ from .catalogue import (
     Entry,
     bare_name_preference,
     default_catalogue,
+    local_problems,
     required_names,
+    reset_default_catalogue,
 )
 from .model import Certainty, Explanation, Hint, HintContext
 from .render import render_explanation, render_hint, render_search
@@ -52,8 +54,10 @@ __all__ = [
     "HintContext",
     "bare_name_preference",
     "default_catalogue",
+    "local_problems",
     "render_explanation",
     "render_hint",
     "render_search",
     "required_names",
+    "reset_default_catalogue",
 ]

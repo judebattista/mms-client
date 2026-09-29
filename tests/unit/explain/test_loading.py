@@ -78,7 +78,9 @@ def test_extra_file_adds_a_more_specific_variant_and_later_files_win(tmp_path: P
     cat = Catalogue.load(extra_paths=[first, second])
     hint = cat.hint(mms_codes.data_access_error(3), HintContext(service="write", fc="SP"))
     assert hint is not None and hint.entry_id == "rack.denied-sp"
-    assert hint.render() == "Likely cause: On this rack the relays only accept setting writes from 10.0.0.20"
+    # a hint from a file that is not part of the package says so (FLD-2)
+    assert hint.render() == "[local] Likely cause: On this rack the relays only accept setting writes from 10.0.0.20"
+    assert hint.source == str(second)
     # the layered variant ties with the built-in one on specificity and wins by position
     assert any("rack.denied-sp" in p for p in cat.lint())
 

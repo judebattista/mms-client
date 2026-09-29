@@ -57,6 +57,7 @@ AREAS = (
     "Help",
     "Session",
     "Inventory",
+    "Local data",
     "Shell",
 )
 

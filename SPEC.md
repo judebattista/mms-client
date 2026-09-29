@@ -1,6 +1,6 @@
 # ied-client — Specification index
 
-**Status:** Draft 0.4 (2026-09-25) — v1 implementation in progress; see decision records.
+**Status:** Draft 0.5 (2026-09-28) — v1 implementation in progress; offline `.deb` installation (PLT-5) and local field data (FLD-1 … FLD-6) added; see decision records.
 
 As of this draft, the specification is split into two documents so that the parts of this IEC 61850
 client that do not depend on the wire protocol can be described once and reused if a second IEC 61850

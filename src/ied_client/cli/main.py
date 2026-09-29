@@ -9,7 +9,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from ied_client import LEGACY_TOOL_NAME, TOOL_NAME, __version__
+from ied_client import LEGACY_TOOL_NAME, TOOL_NAME, __version__, buildinfo
 from ied_client.protocol import registry as protocols
 
 from . import registry, runner
@@ -63,7 +63,7 @@ def overall_help() -> str:
 
 
 def version_text() -> str:
-    """The tool's version and, per installed protocol module, the versions of its libraries."""
+    """The tool's version, how it was installed and, per installed protocol module, its libraries' versions."""
     parts = []
     for name in protocols.available():
         try:
@@ -72,7 +72,8 @@ def version_text() -> str:
             versions = {}
         libs = ", ".join(f"{k.replace('_', '-')} {v}" for k, v in versions.items())
         parts.append(f"{name}: {libs}" if libs else name)
-    return f"{TOOL_NAME} {__version__}" + (f" (protocols: {'; '.join(parts)})" if parts else "")
+    text = f"{TOOL_NAME} {__version__} ({buildinfo.describe()})"
+    return text + (f"\nprotocols: {'; '.join(parts)}" if parts else "")
 
 
 def main(argv: Sequence[str] | None = None) -> int:

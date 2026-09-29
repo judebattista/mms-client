@@ -1,6 +1,6 @@
 # IED client — general specification
 
-**Status:** Draft 0.1 (2026-09-25) — split out of `SPEC.md` 0.3.
+**Status:** Draft 0.2 (2026-09-28) — offline installation (PLT-5) and local field data (§13.1) added. Draft 0.1 (2026-09-25) was split out of `SPEC.md` 0.3.
 
 This is the protocol-independent half of the tool's specification. It describes an **IED
 client**: a test-rack tool that associates with an IEC 61850 device, browses its data model,
@@ -87,7 +87,8 @@ any power grid, but the IEDs are real devices with real outputs.
 | ID | Requirement |
 |---|---|
 | PLT-1 | Must run on Ubuntu (LTS) and Kali Linux. Windows and macOS are not supported. |
-| PLT-2 | Must run in a virtual environment with a pinned Python version (uv or pyenv), not the system Python. Kali's rolling Python may be ahead of what a protocol module's dependencies ship wheels for. |
+| PLT-2 | Must run on a pinned, private Python, never the system Python: in development the uv-managed virtual environment (`.python-version`); on operator machines the CPython bundled in the package (PLT-5). Kali's rolling Python may be ahead of what a protocol module's dependencies ship wheels for. |
+| PLT-5 | Must be installable on an Ubuntu LTS or Kali machine **without network access**, from a single package file (`sudo apt install ./ied-client_<version>_amd64.deb`), and must need no network at run time other than the rack. The package carries its own CPython and every Python dependency pinned in `uv.lock` under `/opt/ied-client`, depends only on packages every such system has (libc6 ≥ 2.28, libstdc++6, libgcc-s1), and records its build (`/opt/ied-client/BUILD-INFO.json`, shown by `--version`). Built by `packaging/build-deb.sh`, verified on clean containers with networking off by `packaging/verify-deb.sh` (docs/packaging.md). amd64 only for now. |
 
 Protocol-library dependencies and licensing are specified per protocol module (see
 MMS-PROTOCOL-SPEC.md §2 for the current one).
@@ -131,7 +132,7 @@ native names are opaque strings supplied by its `Naming` and shown alongside the
 | PROTO-9 | **Layered diagnosis**: expose its own connection process as an ordered list of named layers below "model" (DIA-1) that the diagnosis engine can probe independently and stop at; each layer produces a structured result the generic engine can render. Provide a `classify` function that turns the module's own generic connect failure into a specific layer and reason (DIA-3). |
 | PROTO-10 | **Security-requirement detection** (optional): a check for "this device appears to require transport/association security this module doesn't implement," feeding DIA-6. A module without such a signal to check simply doesn't implement this. |
 | PROTO-11 | **Version/library metadata** for the `tool` block of the JSON envelope (ARC-3). |
-| PROTO-12 | **Association-limit / quirk hooks**: accept identity-keyed hints (limits, refusal-classification patterns) from a quirks-style data file for DIA-4; the file's schema and content are module-specific and live with that module's spec. |
+| PROTO-12 | **Association-limit / quirk hooks**: accept identity-keyed hints (limits, refusal-classification patterns) from a quirks-style data file for DIA-4; the file's schema and content are module-specific and live with that module's spec. The module loads them through the client's `ied_client.quirks.load_quirks_for(module)`, so that the machine's local quirks for that module (FLD-1) are layered on its built-in file. |
 | PROTO-13 | **Error/status catalogue**: supply the full enumeration of error and status codes it can produce, so the explanation catalogue's completeness (EXP-7) can be checked mechanically against it rather than by inspection. |
 
 ### 4.2 Safety profile
@@ -166,6 +167,7 @@ native names are opaque strings supplied by its `Naming` and shown alongside the
 | Help | `explain` |
 | Session | `set`, `log`, `restore`, `export` |
 | Inventory | `inventory from-scd`, `inventory validate` |
+| Local data | `local status`, `local edit`, `local add-quirk`, `local export`, `local import`, `local prune` (§13.1) |
 
 | ID | Requirement |
 |---|---|
@@ -205,7 +207,7 @@ them out, and fall back to asking the operator only when it can't.
 | IDN-5 | "Don't know", and all non-interactive use (one-shot commands with `--json`, the future pytest phase), result in edition `unknown`. Edition-independent checks run; edition-dependent checks report `not-run` with the reason. The tool never blocks waiting for input in non-interactive mode. |
 | IDN-6 | Operator-supplied and discovered identities can be written back to the experiment inventory (with confirmation), so each experiment is only asked once. |
 | IDN-7 | Edition-dependent checks adapt: e.g. a missing `LocSta` is not an issue on Ed1, but is a warning on Ed2. |
-| IDN-9 | Known vendor/model/firmware quirks that affect diagnosis or checks are recorded in a per-protocol-module data file (PROTO-12), keyed by identity. It starts empty per protocol module and grows from spikes and incident files (LOG-3). |
+| IDN-9 | Known vendor/model/firmware quirks that affect diagnosis or checks are recorded in a per-protocol-module data file (PROTO-12), keyed by identity. It starts empty per protocol module and grows from spikes and incident files (LOG-3). An offline machine records its own quirks in a local layer (`local add-quirk`, FLD-1), which reaches the module's file through review (FLD-5). |
 
 IDN-2's `LLN0.NamPlt.ldNs` → edition mapping (`LDNS_RULES` in `core/identity.py`): 2003 → Ed1,
 `2007` and `2007A` → Ed2, `2007B` and later → Ed2.1 — **always marked `inferred`, never
@@ -367,7 +369,7 @@ Other ST and MX values are not captured: they change continuously and would make
 | EXP-2 | `explain last`, `explain <code>` and `explain <term>` (LN class, CDC, FC, ctlModel, AddCause, …) give a fuller explanation and the next checks to try. |
 | EXP-3 | Catalogue entries match on the error **and** its context (FC, CDC, service, mode). Example: an access-denied error on FC=ST → "not writable by design"; on FC=SP → "check access rights / source address". |
 | EXP-4 | Hints must state their certainty: "likely cause", "check". A hint may state a diagnosis as fact only when the tool has proved it. |
-| EXP-5 | The catalogue is a data file in the repo (e.g. YAML), editable without code changes. |
+| EXP-5 | The catalogue is a data file in the repo (e.g. YAML), editable without code changes. An installed copy of the tool also loads the local catalogue files of the machine it runs on (FLD-1), whose entries replace built-in ones with the same id. |
 | EXP-6 | Descriptions are original text. IEC 61850 standard text must not be copied (copyright). |
 | EXP-7 | **Minimum v1 coverage (acceptance criterion):** the catalogue must cover every error/status code the active protocol module's own catalogue (PROTO-13) declares, plus every control AddCause value (data-model level, protocol-independent). The concrete enumeration for the MMS module is in MMS-PROTOCOL-SPEC.md. |
 
@@ -378,6 +380,24 @@ Other ST and MX values are not captured: they change continuously and would make
 | LOG-1 | Each session writes a JSONL log: commands, raw requests/responses (summarised), writes with before/after values, controls, RCB changes, and check results. |
 | LOG-2 | `restore` puts back every value written in the session in reverse order, with confirmation. Controls are excluded (CTL-10). |
 | LOG-3 | **Failure record:** `diagnose` and failed operations can be saved as an incident file (device, experiment, inventory, results, log excerpt) with `export --incident`. There is currently no record of rack failures; these files are meant to build one, and to feed the explanation catalogue with patterns observed in this rack. |
+
+### 13.1 Field data (offline machines)
+
+A laptop on the rack may never be able to push to the repository, but what its operators learn
+(a model that accepts only four associations, a hint that is wrong for this rack) must still be
+usable on that laptop at once, and must reach the repository — and from there every other
+machine — eventually. The way it travels is a file carried by hand; the repository stays the
+source of truth, and nothing enters it without review. Formats and the review procedure:
+[docs/field-data.md](docs/field-data.md).
+
+| ID | Requirement |
+|---|---|
+| FLD-1 | **Local layers.** Explanation entries (the catalogue format, EXP-5) and quirks (a protocol module's quirks format, IDN-9) may be added on the machine, in a machine-wide layer (`/etc/ied-client/`, written with sudo) and a per-user layer (`~/.config/ied-client/`), loaded in that order after the built-in data: a local catalogue entry replaces a built-in one with the same id; a local quirk wins over an equally specific built-in one. `local edit` edits them in a text editor and validates before saving; `local add-quirk <device>` records a quirk matched on the exact identity the device reports, together with its evidence (an incident file saved into the layer, or a stated source). Package upgrades never touch the local layers. |
+| FLD-2 | **Provenance shown.** Anything that comes from a local file says so wherever it is used: hints are prefixed `[local]`, `explain` names the local file, and diagnosis findings based on a local quirk say "a local quirks file (not yet reviewed into the package)". |
+| FLD-3 | **Broken local files are tolerated.** A local file that does not load is left out, with a warning, and never disables the tool: the built-in data and the other local files still work. `local status` shows which file and why (exit 1, `tool:local-data-invalid`). |
+| FLD-4 | **Field bundle.** `local export` writes all local layers of the machine into one self-contained JSON file (kind `ied-client-field-data`): the files as written (comments included) with checksums, the incident files they cite, a summary of the entries with fingerprints, and provenance (host, user, date, package version and commit). `local import` adds another machine's bundle to this machine's local data (laptop to laptop), without letting it override this machine's own `local.yaml`. |
+| FLD-5 | **Reviewed ingest.** `tools/ingest_field_data.py BUNDLE` classifies every entry against the repository (add / change / duplicate / conflict / already reviewed), and with `--apply` lets a maintainer accept, reject with a reason, or skip each one. Accepted entries are written into the right data file (keeping every other byte of it), incidents are kept under `field-data/incidents/`, the bundle under `field-data/bundles/`, and nothing is written unless the resulting catalogue and quirks files load. A quirk that contradicts an existing one is never taken automatically. |
+| FLD-6 | **Ledger.** Every review decision is recorded by the entry's content fingerprint in `ied_client/data/field-ledger.yaml`, which ships in the package. After an upgrade, `local status` shows which local entries have been reviewed (accepted, possibly reworded, or rejected with the reason) and `local prune` removes them, so the reviewed version in the package takes over. |
 
 ## 14. Architecture
 
@@ -470,3 +490,5 @@ module's own spec, not here.
 | 2026-09-25 | Code split to match (ARC-5): the client is the `ied_client` package, the protocol module contract is `ied_client.protocol`, and the MMS module is the separate `mms_protocol` package, found through the `ied_client.protocols` entry point. Error-code domains are an open registry that modules extend. OI-9 moved here from the MMS spec, since the `ldNs` mapping reads a data-model attribute and is protocol-independent. |
 | 2026-09-25 | Scope of the protocol module contract: the tool is an IEC 61850 client and a protocol module is an IEC 61850 SCSM (MMS/8-1 today). The contract is expressed in ACSI terms (object and control block references, FCs, the control model); protocols without the IEC 61850 data model are out of scope (§2.3). Replaces the earlier "or a non-MMS protocol entirely" wording. |
 | 2026-09-25 | The tool is renamed `ied-client` (it is an IEC 61850 client; MMS is one protocol module). For a transition period the old name keeps working: the `mms-client` command, `MMS_CLIENT_*` environment variables, session logs in the old state directory (searched by `restore --last` and `log`) and snapshots of kind `mms-client-snapshot`. New files are written under the new name. |
+| 2026-09-28 | Offline installation (PLT-5): operator machines get a self-contained `.deb` (amd64) with a private CPython and all pinned wheels under `/opt/ied-client`, built from `uv.lock` by `packaging/build-deb.sh` and by CI on version tags. Chosen over a single-file binary (PyInstaller/AppImage), which would hide the YAML data inside the binary and break entry-point discovery of protocol modules, and over shipping uv plus a wheelhouse, which leaves more moving parts on each laptop. PLT-2 reworded accordingly: the bundled interpreter is the pinned private Python on operator machines. |
+| 2026-09-28 | Field data (§13.1): offline machines keep their own quirks and explanation entries in local layers, carry them back as a bundle file, and a maintainer reviews them into the repository with `tools/ingest_field_data.py`; the ledger in the package tells the laptops what became of their entries. Local data is always marked as such (FLD-2) and a broken local file never disables the tool (FLD-3). |

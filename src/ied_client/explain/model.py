@@ -106,22 +106,27 @@ class Hint:
     entry_id: str  # the catalogue entry it came from; `explain <entry_id>` gives the full text
     text: str  # one line, without the certainty prefix
     certainty: Certainty
+    source: str | None = None  # the local file it came from (FLD-2); None for the built-in catalogue
 
     def render(self) -> str:
-        """The hint as shown to the operator: ``Likely cause: …``, ``Check: …`` or the fact itself."""
-        return f"{self.certainty.prefix}{self.text}"
+        """The hint as shown to the operator: ``Likely cause: …``, ``Check: …`` or the fact itself,
+        after ``[local]`` when it comes from a local file rather than the package (FLD-2)."""
+        return f"{'[local] ' if self.source else ''}{self.certainty.prefix}{self.text}"
 
     def __str__(self) -> str:
         return self.render()
 
     def to_json(self) -> dict:
-        return {
+        out = {
             "key": self.key,
             "entry_id": self.entry_id,
             "certainty": self.certainty.value,
             "text": self.text,
             "rendered": self.render(),
         }
+        if self.source:  # only for local entries, so the built-in shape is unchanged
+            out["source"] = self.source
+        return out
 
 
 @dataclass(frozen=True)
@@ -137,9 +142,10 @@ class Explanation:
     related: tuple[str, ...]
     keys: tuple[str, ...] = ()  # error keys the entry covers (errors only)
     hint: Hint | None = None  # the one-line hint for the queried error/context (errors only)
+    source: str | None = None  # the local file the entry came from (FLD-2); None when built in
 
     def to_json(self) -> dict:
-        return {
+        out = {
             "id": self.id,
             "title": self.title,
             "kind": self.kind,
@@ -150,3 +156,6 @@ class Explanation:
             "keys": list(self.keys),
             "hint": self.hint.to_json() if self.hint else None,
         }
+        if self.source:
+            out["source"] = self.source
+        return out

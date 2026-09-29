@@ -784,6 +784,27 @@ entries:
   hint: "A local file could not be read or written (exists, missing, a directory, or no permission); check the path"
   certainty: fact
 
+- id: tool.local-data-invalid
+  keys: [tool:local-data-invalid]
+  title: A local data file does not load
+  summary: >-
+    One of this machine's own quirks or explanation files (in /etc/ied-client or
+    ~/.config/ied-client) is not valid, so the tool leaves it out and works with the rest.
+  details: |
+    Local files hold what operators have learned about the rack on this machine. A file that does
+    not load is ignored as a whole: the built-in explanations and quirks, and the other local files,
+    still work. `local status` names the file and the first problem found in it (the entry and the
+    field).
+
+    `local edit` checks a file before saving it, so this usually means the file was changed with
+    another editor, or copied in from somewhere else.
+  next_checks:
+    - "Run `local status` to see which file and which entry"
+    - "Fix it with `local edit hints` or `local edit quirks` (add `--file NAME` for a file other than local.yaml)"
+  related: [tool.local-file-error]
+  hint: "A local quirks or explanation file is invalid and was left out; `local status` shows where, `local edit` fixes it"
+  certainty: fact
+
 - id: tool.unknown-protocol
   keys: [tool:unknown-protocol]
   title: Unknown protocol

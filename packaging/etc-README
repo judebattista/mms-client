@@ -1,0 +1,17 @@
+ied-client — machine-wide local data (IED-CLIENT-SPEC.md §13.1, FLD-1)
+
+Files here are layered on top of the catalogue and quirks built into the package, for every user
+of this machine. Each user can add their own in ~/.config/ied-client/ (same layout), which is
+loaded after this directory.
+
+  hints/*.yaml              explanation catalogue entries (format: `ied-client local edit hints`
+                            opens a template that documents it)
+  quirks/<protocol>/*.yaml  vendor/model/firmware quirks, e.g. quirks/mms/local.yaml
+  incidents/                incident files that quirk `source` fields cite
+
+Edit with `sudo ied-client local edit hints --system` (or `quirks`) so the file is validated
+before it is saved; `ied-client local status` shows what is loaded and whether it is valid.
+`ied-client local export` bundles this directory and the user's for the trip back to the repo
+(docs/field-data.md, installed in /usr/share/doc/ied-client/).
+
+Package upgrades never change these files (this README is a conffile; the rest is yours).

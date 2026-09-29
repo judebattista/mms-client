@@ -46,6 +46,10 @@ class Interaction(Protocol):
 
     def choose(self, prompt: str, options: list[tuple[str, str]], *, default: str | None = None) -> str | None: ...
 
+    def ask(self, prompt: str, *, default: str | None = None) -> str | None:
+        """Free text; an empty answer gives ``default``."""
+        ...
+
     def notify(self, message: str) -> None: ...
 
 
@@ -65,6 +69,9 @@ class NonInteractive:
         return False
 
     def choose(self, prompt: str, options: list[tuple[str, str]], *, default: str | None = None) -> str | None:
+        return default
+
+    def ask(self, prompt: str, *, default: str | None = None) -> str | None:
         return default
 
     def notify(self, message: str) -> None:
@@ -98,6 +105,10 @@ class Scripted:
         self.options.append(list(options))
         ans = self._next(prompt)
         return None if ans is None else str(ans)
+
+    def ask(self, prompt: str, *, default: str | None = None) -> str | None:
+        ans = self._next(prompt)
+        return default if ans is None or ans == "" else str(ans)
 
     def notify(self, message: str) -> None:
         self.messages.append(message)

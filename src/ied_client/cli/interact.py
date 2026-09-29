@@ -1,7 +1,7 @@
 """Operator interaction for the core's confirmations and questions (``core.safety.Interaction``).
 
 * :class:`PromptInteraction` asks at the terminal with prompt_toolkit (y/N, typed confirmation,
-  choose from a list with a "don't know"-style default).
+  choose from a list with a "don't know"-style default, free text).
 * :class:`TextNonInteractive` never blocks (IDN-5): it answers "no" to every confirmation and takes
   the default of every question, and shows notifications as text unless JSON output is on.
 """
@@ -96,6 +96,12 @@ class PromptInteraction:
                     return key
             self.out.warn(f"{a!r} is not one of the options.")
         return default
+
+    def ask(self, prompt: str, *, default: str | None = None) -> str | None:
+        ans = self._ask(prompt, f"[Enter = {default}] > " if default else "> ")
+        if ans is None:
+            return default
+        return ans.strip() or default
 
     def notify(self, message: str) -> None:
         self.out.block(message)

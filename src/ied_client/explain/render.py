@@ -44,6 +44,8 @@ def _wrap(text: str, width: int, indent: str) -> list[str]:
 def render_explanation(exp: Explanation, width: int = 88) -> str:
     """Format an explanation as plain text: title, codes, hint, summary, details, next checks, related."""
     lines: list[str] = [f"{exp.title}  [{exp.id}]"]
+    if exp.source:
+        lines.append(f"Source: local file {exp.source} (not reviewed into the package)")
     if exp.keys:
         lines.append("Codes: " + ", ".join(_code_label(k) for k in exp.keys))
     if exp.hint is not None:

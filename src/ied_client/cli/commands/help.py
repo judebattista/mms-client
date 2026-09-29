@@ -65,6 +65,19 @@ def render_explanation(out: Output, exp: Any) -> None:
     examples=("explain last", "explain add-cause:blocked-by-switching-hierarchy", "explain XCBR", "explain ResvTms"),
 )
 def explain(ctx: CliContext, args) -> CommandResult:
+    result = _explain(ctx, args)
+    try:
+        from ied_client.explain import local_problems
+
+        problems = local_problems()
+    except Exception:  # pragma: no cover - never let this hide the explanation
+        problems = []
+    if problems:  # FLD-3: a local file that does not load is left out, and the operator is told
+        result.warnings.extend(f"{p} (see `{TOOL_NAME} local status`)" for p in problems)
+    return result
+
+
+def _explain(ctx: CliContext, args) -> CommandResult:
     query = " ".join(args.query).strip()
     if not query:
         raise UsageError("what should be explained? e.g. `explain last`, `explain object-access-denied`, `explain XCBR`")

@@ -6,7 +6,18 @@ The protocol it speaks to a device comes from a protocol module (see :mod:`ied_c
 import os
 from pathlib import Path
 
-__version__ = "0.1.0"
+
+def _version() -> str:
+    """The installed distribution's version (``pyproject.toml`` is the single source)."""
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+
+        return version("ied-client")
+    except PackageNotFoundError:  # pragma: no cover - running from a bare source tree
+        return "0+unknown"
+
+
+__version__ = _version()
 
 # The product's name: the command, the JSON envelope's tool name, the state directory, the default orIdent
 # and the ``kind`` of the files it writes (snapshots, incidents).

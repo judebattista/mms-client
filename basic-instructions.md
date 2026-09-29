@@ -55,19 +55,23 @@ and only report on the association it holds.
 
 Only Ubuntu (LTS) and Kali Linux are supported — not Windows, not macOS.
 
+The tool comes as one package file, `ied-client_<version>_amd64.deb`, which contains everything
+it needs (including its own copy of Python). Installing it does **not** need an internet
+connection, so it works on a rack laptop that is never online. Copy the file to the laptop (a USB
+stick is fine) together with the `.sha256` file next to it, then:
+
 ```sh
-curl -LsSf https://astral.sh/uv/install.sh | sh     # installs "uv", a Python tool manager (once only)
-git clone <this repo> && cd mms-client
-uv sync                                             # downloads the exact Python version and packages needed
-uv run ied-client --help                            # should print the command list
+sha256sum -c ied-client_2.2.0-1_amd64.deb.sha256      # optional: checks the copy is not damaged
+sudo apt install ./ied-client_2.2.0-1_amd64.deb       # the ./ matters: it tells apt this is a file
+ied-client --version                                  # should print the version and "package …"
 ```
 
-Don't try to run `ied-client` with your system's own Python — `uv run` (or the `.venv` it
-creates) is what makes sure you get the exact tested versions of everything. If `uv run
-ied-client --help` prints a list of commands, the install worked.
+If `ied-client --version` prints the version, the install worked. A newer package is installed
+the same way, over the old one; `sudo apt remove ied-client` removes it. Neither touches your
+session logs, inventories or the notes you've added yourself (section 11).
 
-From here on, every command in this guide should be typed as `uv run ied-client ...` unless
-you've activated the virtual environment yourself.
+(If you work from a copy of the source code instead — developers do — install it with `uv sync`
+and type `ied-client …` wherever this guide says `ied-client …`; see the README.)
 
 ---
 
@@ -105,16 +109,16 @@ each time (though a bare IP address always works too, e.g. for a quick one-off c
 XML configuration export), the tool can draft the inventory for you:
 
 ```sh
-uv run ied-client inventory from-scd scd/rack.scd --out experiments/my-test.yaml
+ied-client inventory from-scd scd/rack.scd --out experiments/my-test.yaml
 ```
 
 Or if you just know the subnet the rack is on, ask the tool to find devices on the network:
 
 ```sh
-uv run ied-client discover 10.0.0.0/24 --out experiments/my-test.yaml
+ied-client discover 10.0.0.0/24 --out experiments/my-test.yaml
 ```
 
-Either way, check the result — `uv run ied-client inventory validate` will test every device
+Either way, check the result — `ied-client inventory validate` will test every device
 in the file against the network and tell you if anything doesn't match.
 
 ### The `safety` setting
@@ -163,7 +167,7 @@ diagnose).
 ### Step 1 — check the device is even reachable
 
 ```sh
-uv run ied-client diagnose relay-F12
+ied-client diagnose relay-F12
 ```
 
 This runs a series of checks, in order, and stops at the **first one that fails**: can you
@@ -176,7 +180,7 @@ which layer to look at instead of you guessing.
 ### Step 2 — see who it says it is
 
 ```sh
-uv run ied-client info relay-F12
+ied-client info relay-F12
 ```
 
 Shows the vendor, model and firmware from every source the device offers (there can be more
@@ -186,10 +190,10 @@ picking one silently) and the association parameters (max message size, etc.).
 ### Step 3 — look inside the device
 
 ```sh
-uv run ied-client ls relay-F12                     # top level: logical devices
-uv run ied-client ls relay-F12 /CTRL                # inside one logical device
-uv run ied-client tree relay-F12 /CTRL/CSWI1        # everything under one logical node, as a tree
-uv run ied-client describe relay-F12 CTRL/CSWI1.Pos # what this object means and whether it's writable
+ied-client ls relay-F12                     # top level: logical devices
+ied-client ls relay-F12 /CTRL                # inside one logical device
+ied-client tree relay-F12 /CTRL/CSWI1        # everything under one logical node, as a tree
+ied-client describe relay-F12 CTRL/CSWI1.Pos # what this object means and whether it's writable
 ```
 
 `describe` is worth using liberally — it turns a cryptic object reference into a plain-English
@@ -198,7 +202,7 @@ explanation of what the data represents and whether/how you're allowed to change
 ### Step 4 — read a value
 
 ```sh
-uv run ied-client read relay-F12 CTRL/CSWI1.Pos.stVal
+ied-client read relay-F12 CTRL/CSWI1.Pos.stVal
 ```
 
 Shows the value, its type, its functional constraint (FC — see below), and its quality and
@@ -207,7 +211,7 @@ timestamp, if the device provides them.
 ### Step 5 (optional) — open the interactive shell instead
 
 ```sh
-uv run ied-client shell relay-F12
+ied-client shell relay-F12
 ```
 
 Inside the shell the model works like a filesystem:
@@ -254,14 +258,14 @@ this is not something you'd normally do.
 ### Reading and watching
 
 ```sh
-uv run ied-client read relay-F12 PROT/PTOC1.Str.general
-uv run ied-client watch relay-F12 CTRL/CSWI1.Pos.stVal --interval 2   # poll every 2s, Ctrl-C to stop
+ied-client read relay-F12 PROT/PTOC1.Str.general
+ied-client watch relay-F12 CTRL/CSWI1.Pos.stVal --interval 2   # poll every 2s, Ctrl-C to stop
 ```
 
 ### Writing a setting
 
 ```sh
-uv run ied-client write relay-F12 CTRL/GGIO1.Setp1.setVal 12
+ied-client write relay-F12 CTRL/GGIO1.Setp1.setVal 12
 ```
 
 The tool figures out the correct data type from the device's own model — you don't tell it
@@ -274,9 +278,9 @@ know).
 Setting groups (SG/SE) can't be written with plain `write` — use `setgroup` instead:
 
 ```sh
-uv run ied-client setgroup relay-F12 show
-uv run ied-client setgroup relay-F12 edit 2 PROT/PTOC1.StrVal.setMag.f 1.2
-uv run ied-client setgroup relay-F12 activate 2
+ied-client setgroup relay-F12 show
+ied-client setgroup relay-F12 edit 2 PROT/PTOC1.StrVal.setMag.f 1.2
+ied-client setgroup relay-F12 activate 2
 ```
 
 ### Operating a control (e.g. closing a breaker)
@@ -285,7 +289,7 @@ uv run ied-client setgroup relay-F12 activate 2
 can move a physical contact.
 
 ```sh
-uv run ied-client operate relay-F12 CTRL/CSWI1.Pos close --orcat station
+ied-client operate relay-F12 CTRL/CSWI1.Pos close --orcat station
 ```
 
 Before it sends anything, the tool shows a **pre-flight summary**: the object, the control
@@ -321,13 +325,13 @@ client having to keep asking. `rcb` lists them and shows who (if anyone) current
 one:
 
 ```sh
-uv run ied-client rcb relay-F12
+ied-client rcb relay-F12
 ```
 
 `subscribe` turns one on and streams reports to your terminal until you press Ctrl-C:
 
 ```sh
-uv run ied-client subscribe relay-F12 urcbEvents
+ied-client subscribe relay-F12 urcbEvents
 ```
 
 If the RCB you want is already in use by someone else, `subscribe` won't just fail — it lists
@@ -348,8 +352,8 @@ tells you exactly what's left and for how long.
 ### `check` — compare against a reference, or just sanity-check the device on its own
 
 ```sh
-uv run ied-client check relay-F12                                    # self-consistency checks only
-uv run ied-client check relay-F12 --reference scd/rack.scd --ied F12 # also compares against an SCD
+ied-client check relay-F12                                    # self-consistency checks only
+ied-client check relay-F12 --reference scd/rack.scd --ied F12 # also compares against an SCD
 ```
 
 Without a reference file, `check` still runs useful checks that don't need one: do all the
@@ -372,13 +376,13 @@ If you don't have an SCD handy, or you just want a "known good" baseline to come
 later, take a snapshot once the rack is working correctly:
 
 ```sh
-uv run ied-client snapshot relay-F12 --out snapshots/relay-F12-good.json
+ied-client snapshot relay-F12 --out snapshots/relay-F12-good.json
 ```
 
 Later, compare the live device against it:
 
 ```sh
-uv run ied-client diff relay-F12 snapshots/relay-F12-good.json
+ied-client diff relay-F12 snapshots/relay-F12-good.json
 ```
 
 or compare two snapshots taken at different times against each other. Snapshots never write
@@ -395,9 +399,9 @@ Whenever a command fails, the tool shows you a short hint automatically (unless 
 `--terse`). If you want more detail:
 
 ```sh
-uv run ied-client explain last                         # explain whatever just failed
-uv run ied-client explain object-access-denied          # explain a specific error code
-uv run ied-client explain ctlModel                      # explain a term (LN class, CDC, FC, ...)
+ied-client explain last                         # explain whatever just failed
+ied-client explain object-access-denied          # explain a specific error code
+ied-client explain ctlModel                      # explain a term (LN class, CDC, FC, ...)
 ```
 
 Hints always say how confident they are — "likely cause" vs. a plain statement of fact — the
@@ -407,13 +411,35 @@ If you hit something that seems worth remembering for next time (a device behavi
 intermittent failure), save it:
 
 ```sh
-uv run ied-client export relay-F12 --incident incidents/2026-09-25-f12.json --note "reports stop after ~10 minutes"
+ied-client export relay-F12 --incident incidents/2026-09-25-f12.json --note "reports stop after ~10 minutes"
 ```
 
 This bundles the device, the relevant results, and a log excerpt into one file. Please keep
 these — they're how the hint catalogue and the "known quirks" file (used automatically by
 future diagnoses of the same device model) actually grow. There's currently no other record of
 rack failures.
+
+### Teaching the tool about this rack (on this laptop)
+
+You don't have to wait for a new version of the tool to use what you've learned. You can add
+your own notes on this laptop, and the tool uses them straight away:
+
+```sh
+ied-client local add-quirk relay-F12        # "this model only accepts 4 connections", "ResvTms is ignored", …
+ied-client local edit hints                 # add or change an explanation (opens a text editor)
+ied-client local status                     # what you've added, and whether it's all valid
+```
+
+`local add-quirk` reads the device's exact vendor/model/firmware for you (a typo would mean the
+note never applies) and asks what you observed and how you know — the easiest answer is to let it
+save an incident file right then. Anything that comes from your own notes is marked `[local]` (or
+"a local quirks file") so nobody mistakes it for the tool's built-in knowledge.
+
+**Taking it back.** Your notes only help other laptops once they're in the tool itself. When you
+can, run `ied-client local export --out /media/usb/` and give the file it writes to whoever
+maintains the tool; they review it into the next version. After you install that version,
+`ied-client local status` shows which of your notes were taken (or why not), and
+`ied-client local prune` tidies away the ones the package now covers.
 
 ---
 
@@ -424,13 +450,13 @@ Every session writes a log automatically (JSONL, one line per event) to
 happen.
 
 ```sh
-uv run ied-client log                    # show this session's log path and recent entries
+ied-client log                    # show this session's log path and recent entries
 ```
 
 If you wrote several values during a session and want to put them back the way they were:
 
 ```sh
-uv run ied-client restore relay-F12 --last
+ied-client restore relay-F12 --last
 ```
 
 This replays every write from the most recent earlier session on that device, newest value
@@ -465,6 +491,7 @@ ied-client explain last | <code> | <term>
 ied-client log
 ied-client restore <device> --last
 ied-client export <device> --incident FILE --note "..."
+ied-client local status | add-quirk <device> | edit hints | export
 ied-client shell <device>                          # interactive; commands above minus "<device>"
 
 # every command also takes --json (machine-readable output) and --terse (no hints)

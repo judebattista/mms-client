@@ -1,6 +1,6 @@
 [project]
 name = "ied-client"
-version = "0.1.0"
+version = "2.2.0"
 description = "IEC 61850 IED client (with a pluggable MMS protocol module) for verifying and troubleshooting IEDs in a test rack"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -54,3 +54,6 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM"]
 ignore = ["E501", "SIM105", "SIM108"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["tools"]  # repository tools (tools/ingest_field_data.py), imported by their tests

@@ -249,23 +249,40 @@ def _export_args(p, oneshot: bool) -> None:
     examples=("export --incident incidents/2026-09-24-f12.json --note 'reports stop after 10 min'",),
 )
 def export(ctx: CliContext, args) -> CommandResult:
-    from ied_client.core.incident import build_incident, write_incident
-
     s = ctx.session
     if s is None:
         raise UsageError(f"no device: `connect <device>` first, or run `{TOOL_NAME} export <device> --incident FILE`")
     path = Path(args.incident)
     if path.exists() and not args.overwrite:
         raise FileExistsError(f"{path} exists (use --overwrite)")
-    # In one-shot mode this session has just started: take the excerpt from an earlier log.
-    source: Path | None = Path(args.log) if args.log else None
+    body = write_incident_file(ctx, s, path, note=args.note, log=Path(args.log) if args.log else None)
+    data = {"file": str(path.resolve()), "log_entries": len(body.get("log_excerpt") or []), "log_file": body.get("log_file"),
+            "results": sorted((body.get("results") or {}).keys())}
+
+    def text(out: Output) -> None:
+        out.ok(f"Incident file written: {data['file']}")
+        out.line(f"  log excerpt: {data['log_entries']} entries from {data['log_file'] or 'this session'}", style=STYLE_NOTE)
+        if data["results"]:
+            out.line(f"  results included: {', '.join(data['results'])}", style=STYLE_NOTE)
+        if body.get("last_error"):
+            out.line(f"  last error: {code_label(body['last_error']['error'])}", style=STYLE_NOTE)
+
+    return CommandResult(data=data, text=text)
+
+
+def write_incident_file(ctx: CliContext, s: Any, path: Path, *, note: str | None = None, log: Path | None = None) -> dict[str, Any]:
+    """Write an incident file (LOG-3) for session ``s``; returns its body. In one-shot mode the session
+    has just started, so the log excerpt and results come from the device's latest earlier log."""
+    from ied_client.core.incident import build_incident, write_incident
+
+    source: Path | None = log
     if source is None and not ctx.in_shell:
         source = latest_log_for(ctx, s.device_name, exclude=s.log.path)
     if source is None:
-        write_incident(s, path, note=args.note)
+        write_incident(s, path, note=note)
         body = json.loads(path.read_text(encoding="utf-8"))["result"]
     else:
-        doc = build_incident(s, note=args.note)
+        doc = build_incident(s, note=note)
         body = doc["result"]
         entries = load_log(source)
         body["log_file"] = str(source)
@@ -280,15 +297,4 @@ def export(ctx: CliContext, args) -> CommandResult:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(doc, indent=1, sort_keys=True, ensure_ascii=False, default=str) + "\n", encoding="utf-8")
         s.log.write("note", action="export-incident", path=str(path))
-    data = {"file": str(path.resolve()), "log_entries": len(body.get("log_excerpt") or []), "log_file": body.get("log_file"),
-            "results": sorted((body.get("results") or {}).keys())}
-
-    def text(out: Output) -> None:
-        out.ok(f"Incident file written: {data['file']}")
-        out.line(f"  log excerpt: {data['log_entries']} entries from {data['log_file'] or 'this session'}", style=STYLE_NOTE)
-        if data["results"]:
-            out.line(f"  results included: {', '.join(data['results'])}", style=STYLE_NOTE)
-        if body.get("last_error"):
-            out.line(f"  last error: {code_label(body['last_error']['error'])}", style=STYLE_NOTE)
-
-    return CommandResult(data=data, text=text)
+    return body

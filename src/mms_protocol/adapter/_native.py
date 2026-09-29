@@ -306,8 +306,9 @@ def library() -> C.CDLL:
                 import pyiec61850.pyiec61850 as ext  # the only pyiec61850 import in the code base
             except Exception as exc:  # pragma: no cover - depends on the installation
                 raise NativeLibraryError(
-                    f"pyiec61850-ng could not be imported ({exc}). Install the pinned wheel into the "
-                    "project's virtual environment (uv sync); see SPEC.md PLT-2."
+                    f"pyiec61850-ng could not be imported ({exc}). Reinstall the ied-client package "
+                    "(sudo apt install --reinstall ./ied-client_<version>_amd64.deb); in a development "
+                    "checkout, run `uv sync`. See IED-CLIENT-SPEC.md PLT-2/PLT-5."
                 ) from exc
             _handle = C.CDLL(ext._pyiec61850.__file__)
         return _handle

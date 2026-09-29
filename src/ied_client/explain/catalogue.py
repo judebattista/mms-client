@@ -45,7 +45,7 @@ from pathlib import Path
 
 import yaml
 
-from ied_client import codes
+from ied_client import codes, localdata
 from ied_client.codes import Domain, ErrorInfo
 from ied_client.protocol import registry as protocols
 
@@ -132,6 +132,7 @@ REQUIRED_TOOL_CODES: tuple[str, ...] = (
     "internal-error",
     "inventory-invalid",
     "local-file-error",
+    "local-data-invalid",
     "unknown-protocol",
     "connection-lost",
 )
@@ -726,7 +727,8 @@ class Catalogue:
 
     def _make_hint(self, entry: Entry, key: str, ctx: HintContext) -> Hint:
         assert entry.hint is not None and entry.certainty is not None
-        return Hint(key=key, entry_id=entry.id, text=_fill(entry.hint, ctx), certainty=entry.certainty)
+        return Hint(key=key, entry_id=entry.id, text=_fill(entry.hint, ctx), certainty=entry.certainty,
+                    source=None if entry.builtin else entry.source)
 
     # -- explanations ------------------------------------------------------------------------
     def explain(self, query: str, ctx: HintContext | None = None) -> Explanation | None:
@@ -820,6 +822,7 @@ class Catalogue:
             related=related,
             keys=tuple(k for k in entry.keys if not k.endswith(":*")),
             hint=hint,
+            source=None if entry.builtin else entry.source,
         )
 
     # -- query resolution --------------------------------------------------------------------
@@ -970,7 +973,45 @@ class Catalogue:
         return True
 
 
+_local_problems: list[str] = []
+
+
 @functools.cache
 def default_catalogue() -> Catalogue:
-    """The built-in catalogue, loaded once per process."""
-    return Catalogue.load()
+    """The built-in catalogue plus the local layers (FLD-1), loaded once per process.
+
+    A local file that does not load is left out, and :func:`local_problems` says why (FLD-3): a
+    mistake on a laptop must never cost the operator the built-in explanations.
+    """
+    builtin = [(label, text, True) for label, text in _builtin_sources()]
+    local: list[tuple[str, str, bool]] = []
+    for path in localdata.catalogue_files():
+        try:
+            local.append((str(path), path.read_text(encoding="utf-8"), False))
+        except (OSError, UnicodeDecodeError) as exc:
+            _local_problems.append(f"{path}: left out, cannot be read ({exc})")
+    try:
+        return Catalogue.from_texts(builtin + local)
+    except CatalogueError:
+        pass
+    kept: list[tuple[str, str, bool]] = []
+    for src in local:
+        try:
+            Catalogue.from_texts([*builtin, *kept, src])
+        except CatalogueError as exc:
+            _local_problems.append(f"left out: {exc}")
+            continue
+        kept.append(src)
+    return Catalogue.from_texts(builtin + kept)
+
+
+def local_problems() -> list[str]:
+    """Local catalogue files :func:`default_catalogue` left out, and why (FLD-3)."""
+    default_catalogue()
+    return list(_local_problems)
+
+
+def reset_default_catalogue() -> None:
+    """Forget the loaded catalogue (after a local file changed, and in tests)."""
+    default_catalogue.cache_clear()
+    _local_problems.clear()

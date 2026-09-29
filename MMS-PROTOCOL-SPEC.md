@@ -27,6 +27,11 @@ example) — cross-references are given either way.
 **Licence note:** libiec61850 is dual-licensed GPLv3 / commercial. Internal use is fine;
 distribution outside the organisation needs review.
 
+**Offline package (IED-CLIENT-SPEC.md PLT-5):** the `.deb` carries the pinned pyiec61850-ng wheel
+(with the libiec61850 build it bundles) installed into the package's own CPython 3.12, so the
+adapter resolves exactly the same library as in development. The package build checks that the
+bundled library loads (`_native.library()`) and that the `mms` entry point is registered.
+
 ## 2. Architecture: why the adapter uses ctypes instead of the SWIG bindings
 
 ```
@@ -198,7 +203,11 @@ or incident file) and `added` (date).
 Procedure for a new IED model (from RSK-6): `diagnose`, `authority-probe` in expert mode across
 all orCats, `rcb` + `subscribe` (note `ResvTms`/`Owner` behaviour specifically), `setgroup
 show`/`edit`, `info` (identity sources and `ldNs` value) — then write the quirks entry from what
-you observed.
+you observed. On an offline machine, record it with `ied-client local add-quirk <device>`: it lands
+in the machine's local layer (`quirks/mms/*.yaml`, IED-CLIENT-SPEC.md FLD-1), is used by `diagnose`
+at once, and reaches this file through `local export` and `tools/ingest_field_data.py` (FLD-5).
+The module loads its quirks through `ied_client.quirks.load_quirks_for` (PROTO-12), which adds the
+local layers.
 
 ## 11. Known stack limitations
 
